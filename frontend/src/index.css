@@ -1,0 +1,13 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html, body, #root { height: 100%; }
+  body { font-family: 'Inter', system-ui, sans-serif; }
+}
+
+@layer utilities {
+  .animate-rise { animation: rise 0.35s ease forwards; }
+  .tabular { font-variant-numeric: tabular-nums; }
+}
