@@ -940,7 +940,7 @@ Developers give agents one governed purchase tool instead of raw PayPal payment 
 @media(max-width:600px){{.assistant-panel,.governance-panel{{padding:15px}}.assistant-head{{flex-direction:column}}.agent-form{{align-items:stretch;flex-direction:column}}.agent-form .btn{{justify-content:center}}.agent-product{{align-items:flex-start;flex-direction:column}}}}
 </style>
 <script>
-(()=>{{
+document.addEventListener('DOMContentLoaded',()=>{{
   const csrf={json.dumps(csrf_for(token))};
   const thread=document.getElementById('agent-thread');
   const results=document.getElementById('agent-results');
@@ -1031,7 +1031,7 @@ Developers give agents one governed purchase tool instead of raw PayPal payment 
   }}
   form.addEventListener('submit',event=>{{event.preventDefault();const query=requestInput.value.trim()||'direct flight under $500';message('You',query,true);requestInput.value='';if(modelEnabled)runModel(query);else{{message('Agent tool · search_products','Searching the registered catalog. The local demo agent is scripted; it does not call a language model.');search(query)}}}});
   if(!modelEnabled)search('direct flight under $500');
-}})();
+}});
 </script>"""
         return HTMLResponse(page("TrustGate / Live Console", body, "console", token,
                                  extra_head=assistant_script))
