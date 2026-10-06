@@ -168,16 +168,15 @@ def test_login_and_reset_are_rate_limited():
     assert judges[0].reset().status_code == 429
 
 
-def test_idle_workspaces_are_evicted_and_count_is_bounded():
+def test_idle_workspaces_expire_after_ttl():
     now = [0.0]
     ws = DemoWorkspaces(make_review_workspace_factory(), ttl_seconds=100, max_workspaces=3,
                         clock=lambda: now[0], login_limit=(1000, 60))
-    created = [ws.create() for _ in range(5)]
-    assert len(ws) == 3
-    assert ws.by_agent_key(created[0].agent_key) is None  # oldest evicted
+    for _ in range(3):
+        ws.create()
     now[0] += 101
     ws.create()
-    assert len(ws) == 1  # idle ones expired
+    assert len(ws) == 1  # idle past the TTL; capacity-eviction rules are in test_workspace_capacity.py
 
 
 def test_unauthenticated_request_sees_no_workspace(app):

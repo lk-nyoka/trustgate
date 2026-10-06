@@ -24,7 +24,7 @@ from pydantic import BaseModel, ConfigDict, Field, StrictInt
 from .landing import landing_page
 from .service import ApprovalError, AuthError, IdempotencyConflict
 from .policy_author import DraftError, ScriptedDrafter, describe_changes, public_json, validate_draft
-from .workspaces import RateLimited
+from .workspaces import DemoBusy, RateLimited, client_ip
 from .ui_shell import (CSS, EVENT_LABELS, BLOCK_LABELS, chip, checks_html,
                        flow_html, fmt_expiry, layout, reason_label, esc)
 
@@ -318,7 +318,7 @@ body{{min-height:100%;background:var(--bg);padding:24px}}
 
 def create_app(svc, users, csrf_secret, admin_key=None, cookie_secure=False,
                paypal_mode="fake", demo_agent_key=None, assistant_runner=None, workspaces=None,
-               policy_drafter=None):
+               policy_drafter=None, trusted_proxy_hops=0):
     """users: {username: (user_id, password)}.
 
     workspaces: optional DemoWorkspaces. When given (hosted review mode) every login gets its own
@@ -358,8 +358,11 @@ def create_app(svc, users, csrf_secret, admin_key=None, cookie_secure=False,
         return "PAYPAL SANDBOX" if paypal_mode == "sandbox" else "SIMULATED"
 
     def client_key(request):
-        fwd = request.headers.get("x-forwarded-for", "")
-        return fwd.split(",")[0].strip() or (request.client.host if request.client else "anon")
+        peer = request.client.host if request.client else None
+        return client_ip(request.headers, peer, trusted_proxy_hops)
+
+    BUSY_MESSAGE = ("Review demo is currently busy. Please try again in a few minutes. "
+                    "No existing review sessions were removed.")
 
     def start_session(request, user_id):
         """Returns (token, ttl_seconds). In review mode each login is a fresh isolated workspace."""
@@ -458,6 +461,8 @@ def create_app(svc, users, csrf_secret, admin_key=None, cookie_secure=False,
             session_token, ttl = start_session(request, entry[0])
         except RateLimited:
             return _login_page("Too many sign-ins. Wait a minute and try again.", status_code=429)
+        except DemoBusy:
+            return _login_page(BUSY_MESSAGE, status_code=503)
         resp = RedirectResponse("/console", status_code=303)
         resp.set_cookie(COOKIE, session_token,
                         httponly=True, samesite="strict", secure=cookie_secure,
@@ -491,6 +496,8 @@ def create_app(svc, users, csrf_secret, admin_key=None, cookie_secure=False,
             token, ttl = start_session(request, entry[0])
         except RateLimited:
             return JSONResponse({"detail": "Too many sign-ins. Wait a minute and try again."}, status_code=429)
+        except DemoBusy:
+            return JSONResponse({"detail": BUSY_MESSAGE}, status_code=503, headers={"Retry-After": "120"})
         resp = JSONResponse({"ok": True, "csrf": csrf_for(token)})
         resp.set_cookie(COOKIE, token, httponly=True, samesite="lax",
                         secure=cookie_secure, max_age=ttl)

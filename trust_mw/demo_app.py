@@ -62,6 +62,7 @@ def build():
             paypal_mode="fake",
             workspaces=workspaces,
             policy_drafter=drafter,
+            trusted_proxy_hops=int(os.getenv("TRUSTED_PROXY_HOPS", "0") or 0),
         )
         print(f"\n{'='*56}")
         print("  TrustGate REVIEW DEMO (per-session workspaces)")

@@ -72,7 +72,7 @@ cd "C:\Users\ASUS\Desktop\Coding Projects\Build or Die\Week 3\Hackathon\paypal\t
 Expected result:
 
 ```text
-169 passed
+182 passed
 ```
 
 Avoid running `live_check.py` just to open the frontend; it creates real PayPal Sandbox payments and should only be used when you intentionally want to verify the live payment integration.
@@ -232,7 +232,7 @@ python -m pytest -q
 
 ### Application and frontend verification
 
-- **169 tests passed** with `python -m pytest -q`
+- **182 tests passed** with `python -m pytest -q`
 - React production build succeeds with `npm run build` from `frontend/`
 - Desktop and mobile layouts checked; reduced-motion behavior is supported
 - Sign-in journey covers empty, invalid, valid, refresh, logout, back-cache protection, and eight-hour expiry
@@ -327,6 +327,10 @@ python -m uvicorn trust_mw.demo_app:app --reload
 ---
 
 ## Known limitations
+
+- **Hosted demo capacity.** Active review sessions are never evicted: sessions seen in the last 30 minutes, or holding a live pending approval, are protected. At capacity new logins get a friendly 503 "Review demo is currently busy" page and no existing session is removed.
+- **Client IP for rate limiting** uses the socket address by default. Set `TRUSTED_PROXY_HOPS=N` only when N trusted proxies sit in front; `X-Forwarded-For` is then parsed from the right, so a client-supplied leftmost value is ignored. The Render hop count is unverified.
+- **Single-process prototype.** One service lock is held during the PayPal call, so payments serialize and the design assumes one process. Releasing it around the network call is a known follow-up.
 
 - Requires **Python 3.12+** (pinned in `.python-version` and `render.yaml`)
 - Budget is cumulative: captured spend plus live held (approval-pending) reservations. Held intents release their reservation when declined, expired or when the policy is revoked, and approval re-checks the remaining budget under a lock
