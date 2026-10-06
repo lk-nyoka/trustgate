@@ -39,7 +39,7 @@ AI agents can propose payments. A prompt telling them to "ask first" is not an i
 
 ### Quick local run
 ```powershell
-git clone https://github.com/<your-username>/trustgate.git
+git clone https://github.com/lk-nyoka/trustgate.git
 cd trustgate
 
 # Python backend (fake PayPal, no credentials needed)
@@ -169,7 +169,7 @@ The final authorization decision is deliberately independent of the AI. The agen
 ## Setup for judges
 
 ```powershell
-git clone https://github.com/<your-username>/trustgate.git
+git clone https://github.com/lk-nyoka/trustgate.git
 cd trustgate
 pip install -r requirements.txt
 
