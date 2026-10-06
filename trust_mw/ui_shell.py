@@ -222,9 +222,10 @@ def chip(value):
     return f'<span class="chip chip-{esc(safe)}">{esc(str(value))}</span>'
 
 
-def flow_html(v):
+def flow_html(v, simulated=False):
     if v.get("order_id"):
-        mid, mcls, lane, end, ecls = "Authorized", "ok", "ok", "Order captured", "ok"
+        mid, mcls, lane, end, ecls = ("Authorized", "ok", "ok",
+                                      "Simulated payment captured" if simulated else "Order captured", "ok")
     elif v.get("state") == "HELD_FOR_APPROVAL":
         mid, mcls, lane, end, ecls = "Held for approval", "warn", "warn", "Not reached yet", "dim"
     elif v.get("decision") == "BLOCK":
@@ -236,7 +237,7 @@ def flow_html(v):
             f'<div class="flow-lane ok"></div>'
             f'<div class="flow-node {mcls}">TrustGate<small>{esc(mid)}</small></div>'
             f'<div class="flow-lane {lane}"></div>'
-            f'<div class="flow-node {ecls}">PayPal<small>{esc(end)}</small></div>'
+            f'<div class="flow-node {ecls}">{"Simulated adapter" if simulated else "PayPal"}<small>{esc(end)}</small></div>'
             f'</div>')
 
 
@@ -267,13 +268,14 @@ EVENT_LABELS = {
     "HELD_FOR_APPROVAL":               ("Approval required — held for human review", "warn"),
     "APPROVED":                        ("Authenticated user approved",               "ok"),
     "DECLINED":                        ("User declined",                             "bad"),
-    "PAYMENT_CAPTURED":                ("PayPal order created and captured",         "ok"),
+    "PAYMENT_CAPTURED":                ("Payment captured by the payment adapter",   "ok"),
     "PAYMENT_FAILED":                  ("Payment adapter failed",                    "bad"),
     "PAYMENT_MISMATCH":                ("PayPal returned mismatched data",           "bad"),
     "APPROVAL_EXPIRED":                ("Approval window expired",                   "bad"),
     "APPROVAL_REFUSED_POLICY_CHANGED": ("Approval refused — policy changed",         "bad"),
     "APPROVAL_REFUSED_FACTS_CHANGED":  ("Approval refused — facts changed",          "bad"),
-    "POLICY_REVOKED":                  ("Policy revoked by user",                    "bad"),
+    "POLICY_REVOKED":                  ("Spending paused by user (kill switch)",     "bad"),
+    "POLICY_RESUMED":                  ("Spending resumed by user (new policy version)", "ok"),
     "POLICY_CONFIRMED":                ("Policy confirmed",                          "ok"),
 }
 

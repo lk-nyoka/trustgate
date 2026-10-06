@@ -90,7 +90,7 @@ def _flags_html(flags):
 
 def _timeline_items(events):
     dot_map = {
-        "PAYMENT_CAPTURED": "ok", "APPROVED": "ok", "POLICY_CONFIRMED": "ok",
+        "PAYMENT_CAPTURED": "ok", "APPROVED": "ok", "POLICY_CONFIRMED": "ok", "POLICY_RESUMED": "ok",
         "HELD_FOR_APPROVAL": "warn",
         "PAYMENT_FAILED": "bad", "PAYMENT_MISMATCH": "bad", "APPROVAL_EXPIRED": "bad",
         "APPROVAL_REFUSED_POLICY_CHANGED": "bad", "APPROVAL_REFUSED_FACTS_CHANGED": "bad",
@@ -689,6 +689,22 @@ def create_app(svc, users, csrf_secret, admin_key=None, cookie_secure=False,
         events = svc.get_audit(intent_id)
         return jsonable_encoder({"chain_valid": svc.audit.verify(), "events": events})
 
+    @app.post("/api/policy/resume")
+    async def api_resume(request: Request):
+        token, user = human(request)
+        if not user:
+            return JSONResponse({"detail": "auth required"}, status_code=401)
+        body = await request.json()
+        if not csrf_ok(token, body.get("csrf")):
+            return JSONResponse({"detail": "bad CSRF token"}, status_code=403)
+        try:
+            for policy in list(svc.policies.values()):
+                if policy.user_id == user and policy.status == "REVOKED":
+                    svc.resume_policy(token, policy.policy_id)
+        except ApprovalError as exc:
+            return JSONResponse({"detail": str(exc)}, status_code=409)
+        return {"ok": True}
+
     @app.post("/api/policy/revoke")
     async def api_revoke(request: Request):
         token, user = human(request)
@@ -826,6 +842,22 @@ def create_app(svc, users, csrf_secret, admin_key=None, cookie_secure=False,
                         max_age=current_ws.get().svc.auth.session_ttl_seconds)
         return resp
 
+    @app.post("/policy/resume")
+    async def resume(request: Request):
+        token, user = human(request)
+        if not user:
+            return err("human login required", 401)
+        form = await request.form()
+        if not csrf_ok(token, form.get("csrf")):
+            return err("bad CSRF token", 403)
+        try:
+            for policy in list(svc.policies.values()):
+                if policy.user_id == user and policy.status == "REVOKED":
+                    svc.resume_policy(token, policy.policy_id)
+        except ApprovalError as exc:
+            return err(str(exc), 409)
+        return RedirectResponse("/console", status_code=303)
+
     @app.post("/policy/revoke")
     async def revoke(request: Request):
         token, user = human(request)
@@ -850,9 +882,23 @@ def create_app(svc, users, csrf_secret, admin_key=None, cookie_secure=False,
         all_intents = svc.intents_for_user(user)
 
         # ── pending banner (first HELD intent) ───────────────────────────────
+        policy = next((p for p in svc.policies.values()), None)
+        paused = bool(policy and policy.status != "ACTIVE")
         pending = [v for v in all_intents
-                   if v["state"] == "HELD_FOR_APPROVAL" and v["approval_status"] == "PENDING"]
+                   if v["state"] == "HELD_FOR_APPROVAL" and v["approval_status"] == "PENDING"
+                   and not paused and policy and v["policy_version"] == policy.version]
         banner = ""
+        if paused:
+            stuck = sum(1 for v in all_intents if v["state"] == "HELD_FOR_APPROVAL")
+            banner = f"""
+<div style="background:#fef2f2;border:1px solid #fca5a5;border-radius:var(--radius-lg);
+  padding:16px 20px;margin-bottom:20px">
+  <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;
+    color:var(--bad);margin-bottom:6px">&#9888; Policy paused</div>
+  <div style="font-weight:700;font-size:16px;margin-bottom:2px">Agent spending is disabled</div>
+  <div style="color:var(--fg3);font-size:13px">No new purchases can be authorized.
+    {stuck} pending request(s) cannot be approved. Resume spending to submit new requests.</div>
+</div>"""
         if pending:
             p = pending[0]
             f = p["facts"]
@@ -911,8 +957,8 @@ def create_app(svc, users, csrf_secret, admin_key=None, cookie_secure=False,
     <div class="stat-sub">blocked before order</div>
   </div>
   <div class="stat-card">
-    <div class="stat-label">Active policy</div>
-    <div class="stat-value" style="font-size:18px;font-family:ui-monospace">{esc(policy_label)}</div>
+    <div class="stat-label">{'Policy' if paused else 'Active policy'}</div>
+    <div class="stat-value" style="font-size:18px;font-family:ui-monospace;{'color:var(--bad)' if paused else ''}">{esc(policy_label)}{' · PAUSED' if paused else ''}</div>
     <div class="stat-sub">updated this session</div>
   </div>
 </div>"""
@@ -955,17 +1001,29 @@ def create_app(svc, users, csrf_secret, admin_key=None, cookie_secure=False,
         if policy:
             ml = ", ".join(sorted(policy.merchant_allowlist)) or "—"
             cl = ", ".join(sorted(policy.category_allowlist)) or "—"
+            if paused:
+                posture = (f'<div class="posture-badge mb-12" style="background:#fef2f2;border-color:#fca5a5">'
+                           f'<div class="pb-label" style="color:var(--bad)">&#9888; POLICY PAUSED</div>'
+                           f'<div class="pb-sub">Agent spending: DISABLED. Pending requests cannot be approved.</div></div>')
+                card_title, kill_form = "Spending policy", (
+                    f'<form method="post" action="/policy/resume">'
+                    f'<input type="hidden" name="csrf" value="{csrf_for(token)}">'
+                    f'<button class="btn btn-primary btn-sm">&#9654; Resume spending</button></form>')
+            else:
+                posture = ('<div class="posture-badge mb-12"><div class="pb-label">✓ Bounded delegation</div>'
+                           '<div class="pb-sub">Policy rules the authority. AI only supplies the suggestion.</div></div>')
+                card_title, kill_form = "Active policy", (
+                    f'<form method="post" action="/policy/revoke">'
+                    f'<input type="hidden" name="csrf" value="{csrf_for(token)}">'
+                    f'<button class="btn btn-danger btn-sm">&#9888; Pause all agent spending (kill switch)</button></form>')
             policy_html = f"""
 <div class="card" style="margin-top:0">
   <div class="row-between mb-12">
-    <div class="card-title" style="margin:0">Active policy</div>
+    <div class="card-title" style="margin:0">{card_title}</div>
     <span style="background:#dbeafe;color:#1e40af;font-size:10px;font-weight:700;
-      padding:2px 8px;border-radius:5px;letter-spacing:.04em">v{policy.version}.1</span>
+      padding:2px 8px;border-radius:5px;letter-spacing:.04em">v{policy.version}{' · PAUSED' if paused else ''}</span>
   </div>
-  <div class="posture-badge mb-12">
-    <div class="pb-label">✓ Bounded delegation</div>
-    <div class="pb-sub">Policy rules the authority. AI only supplies the suggestion.</div>
-  </div>
+  {posture}
   <div class="fact-grid" style="font-size:12px">
     <dt>Policy ID</dt><dd><code>{esc(policy.policy_id)}</code></dd>
     <dt>Approved merchant</dt><dd>{esc(ml)}</dd>
@@ -975,10 +1033,7 @@ def create_app(svc, users, csrf_secret, admin_key=None, cookie_secure=False,
     <dt>Total budget</dt><dd>${esc(str(policy.max_total_spend))}</dd>
   </div>
   <div class="sep"></div>
-  <form method="post" action="/policy/revoke">
-    <input type="hidden" name="csrf" value="{csrf_for(token)}">
-    <button class="btn btn-danger btn-sm">⚠ Revoke policy (kill switch)</button>
-  </form>
+  {kill_form}
   {reset_form}
 </div>"""
 
@@ -998,7 +1053,7 @@ Developers give agents one governed purchase tool instead of raw PayPal payment 
         <div class="assistant-subtitle">Search registry products, inspect trusted facts, then send a governed proposal.</div></div>
       <span class="demo-agent-tag">{'Anthropic tool agent' if runner_now() else 'Scripted demo agent'}</span>
     </div>
-    <div class="agent-note">{'The model can only search products, inspect registry facts, and submit governed proposals. TrustGate still controls authorization.' if runner_now() else 'This local walkthrough uses a scripted agent, not a live language model. Every proposal still passes through TrustGate policy.'}</div>
+    <div class="agent-note">{'The model can only search products, inspect registry facts, and submit governed proposals. TrustGate still controls authorization.' if runner_now() else 'This walkthrough uses a scripted agent; no live language model is configured. Every proposal still passes through TrustGate policy.'}</div>
     <div class="agent-thread" id="agent-thread" aria-live="polite">
       <div class="agent-message user"><span>You</span><p>Book me a direct flight to Johannesburg under $500. Ask me above $250.</p></div>
       <div class="agent-message"><span>Agent</span><p>{'Ready to search the registered catalog. Any purchase proposal will pass through TrustGate policy.' if runner_now() else 'I found two registered Demo Airlines options. The $180 fare is within the automatic limit; the $320 fare needs your approval.'}</p></div>
@@ -1026,7 +1081,7 @@ Developers give agents one governed purchase tool instead of raw PayPal payment 
       <a id="approval-link" class="btn btn-primary" href="#" hidden>Review purchase</a>
     </div>
     <div class="payment-box">
-      <div class="assistant-kicker">PayPal execution</div><strong id="payment-state">NOT STARTED</strong>
+      <div class="assistant-kicker">Payment execution</div><strong id="payment-state">NOT STARTED</strong>
       <p id="payment-detail">A payment begins only after policy authorizes it.</p>
     </div>
   </aside>
@@ -1408,7 +1463,7 @@ document.addEventListener('DOMContentLoaded',()=>{{
   </div>
   <div>
     <div class="card">
-      {flow_html(v)}
+      {flow_html(v, simulated=(paypal_mode != 'sandbox'))}
       {checks_html("Policy evaluation", v["checks"])}
       {checks_html("Approval bound to these verified facts", [(n,"pass") for n in v["binding_checks"]])}
     </div>
@@ -1432,6 +1487,8 @@ document.addEventListener('DOMContentLoaded',()=>{{
         state = v["state"]
         held = state == "HELD_FOR_APPROVAL"
         captured = state == "CAPTURED"
+        _pol = svc.policies.get(v["policy_id"])
+        approvable = held and bool(_pol) and _pol.status == "ACTIVE" and _pol.version == v["policy_version"]
 
         left = int((v["expires_at"] - svc.clock()).total_seconds()) if v["expires_at"] and held else None
 
@@ -1478,7 +1535,23 @@ document.addEventListener('DOMContentLoaded',()=>{{
   {timer_js}"""
 
         # ── action buttons (only when held) ──────────────────────────────
-        if held:
+        if held and not approvable:
+            c = csrf_for(token)
+            facts_card += f"""
+  <div class="sep"></div>
+  <div style="background:#fef2f2;border:1px solid #fca5a5;border-radius:var(--radius);padding:12px 14px;margin-bottom:12px">
+    <div style="font-weight:700;color:var(--bad);font-size:13px">&#9888; POLICY PAUSED</div>
+    <div style="font-size:12px;color:var(--fg3)">This request can no longer be approved. Resume spending and submit a new request.</div>
+  </div>
+  <div class="row">
+    <form method="post" action="/v1/approvals/{esc(intent_id)}">
+      <input type="hidden" name="csrf" value="{c}">
+      <input type="hidden" name="decision" value="DECLINE">
+      <button class="btn btn-danger">Decline</button>
+    </form>
+    <button class="btn btn-primary" disabled style="opacity:.45;cursor:not-allowed">Approve purchase &#8594;</button>
+  </div>"""
+        elif held:
             c = csrf_for(token)
             facts_card += f"""
   <div class="sep"></div>
@@ -1517,7 +1590,7 @@ document.addEventListener('DOMContentLoaded',()=>{{
 
         right_col = f"""
 <div class="card">
-  {flow_html(v)}
+  {flow_html(v, simulated=(paypal_mode != 'sandbox'))}
   {checks_html("Policy evaluation", v["checks"])}
   {checks_html("Approval bound to these verified facts", [(n,"pass") for n in v["binding_checks"]])}
 </div>

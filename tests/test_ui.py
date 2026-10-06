@@ -62,7 +62,7 @@ def test_approval_binding_checks_are_shown_only_after_a_real_approval():
     for name in ("Merchant verified", "Product verified", "Configured payee binding verified", "Amount verified",
                  "Currency verified", "Policy version verified", "Approval window valid"):
         assert name in page
-    assert "Order captured" in page
+    assert "Simulated payment captured" in page and "Order captured" not in page
     assert len([e for e in env.svc.get_audit(iid) if e["event"] == "APPROVED"][0]["data"]["binding_checks"]) == 7
 
 
@@ -71,4 +71,4 @@ def test_allowed_purchase_page_shows_authorized_flow():
     iid = propose(c, "cpt-jnb-economy-180").json()["intent_id"]
     login(c)
     page = c.get(f"/approvals/{iid}").text
-    assert "Authorized" in page and "Order captured" in page and "Policy evaluation" in page
+    assert "Authorized" in page and "Simulated payment captured" in page and "Policy evaluation" in page

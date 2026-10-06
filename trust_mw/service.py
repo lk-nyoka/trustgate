@@ -140,6 +140,19 @@ class TrustService:
         self.policies[policy_id] = replace(policy, status="REVOKED")
         self.audit.append(None, "POLICY_REVOKED", {"policy_id": policy_id, "by": user})
 
+    def resume_policy(self, session_token, policy_id):
+        with self._lock:
+            user = self.auth.session_user(session_token)
+            policy = self.policies[policy_id]
+            if policy.user_id != user:
+                raise ApprovalError("NOT_POLICY_OWNER")
+            if policy.status != "REVOKED":
+                raise ApprovalError("POLICY_NOT_PAUSED")
+            # New version: requests held before the pause stay unapprovable and must be re-proposed.
+            self.policies[policy_id] = replace(policy, status="ACTIVE", version=policy.version + 1)
+            self.audit.append(None, "POLICY_RESUMED", {"policy_id": policy_id, "by": user,
+                                                       "version": policy.version + 1})
+
     # ---- agent surface ---------------------------------------------------
     @staticmethod
     def request_hash(merchant_reference, product_reference, quantity, source_url):

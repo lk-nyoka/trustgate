@@ -72,7 +72,7 @@ cd "C:\Users\ASUS\Desktop\Coding Projects\Build or Die\Week 3\Hackathon\paypal\t
 Expected result:
 
 ```text
-120 passed
+130 passed
 ```
 
 Avoid running `live_check.py` just to open the frontend; it creates real PayPal Sandbox payments and should only be used when you intentionally want to verify the live payment integration.
@@ -219,7 +219,7 @@ python -m pytest -q
 
 ### Application and frontend verification
 
-- **120 tests passed** with `python -m pytest -q`
+- **130 tests passed** with `python -m pytest -q`
 - React production build succeeds with `npm run build` from `frontend/`
 - Desktop and mobile layouts checked; reduced-motion behavior is supported
 - Sign-in journey covers empty, invalid, valid, refresh, logout, back-cache protection, and eight-hour expiry

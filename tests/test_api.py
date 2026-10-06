@@ -270,7 +270,7 @@ def test_console_renders_assistant_and_honestly_labels_demo_agent():
                  "search_products", "get_product_details", "propose_purchase",
                  "Active spending policy", "Unsafe proposals blocked"):
         assert text in page
-    assert "not a live language model" in page
+    assert "no live language model is configured" in page
     assert "document.addEventListener('DOMContentLoaded'" in page
     csrf = c.get("/api/me").json()["csrf"]
     assert c.get("/api/me").json()["assistant_mode"] == "scripted"
