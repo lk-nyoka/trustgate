@@ -15,6 +15,7 @@ from .api import create_app
 from .demo_data import DictPages, make_policy
 from .registry import demo_registry
 from .service import AuthStore, TrustService
+from .policy_author import LLMDrafter
 from .workspaces import seed_demo_intents
 
 
@@ -51,6 +52,7 @@ def build():
         from .workspaces import DemoWorkspaces, make_review_workspace_factory
         workspaces = DemoWorkspaces(make_review_workspace_factory(
             make_runner if anthropic_client else None))
+        drafter = LLMDrafter(anthropic_client, model) if anthropic_client else None
         app = create_app(
             None,
             {"demo": ("user_1", password)},
@@ -59,6 +61,7 @@ def build():
             cookie_secure=cookie_secure,
             paypal_mode="fake",
             workspaces=workspaces,
+            policy_drafter=drafter,
         )
         print(f"\n{'='*56}")
         print("  TrustGate REVIEW DEMO (per-session workspaces)")
@@ -89,6 +92,7 @@ def build():
         paypal_mode="sandbox",
         demo_agent_key=agent_key,
         assistant_runner=assistant_runner,
+        policy_drafter=LLMDrafter(anthropic_client, model) if anthropic_client else None,
     )
     print(f"\n{'='*56}")
     print("  TrustGate (local) - PayPal Sandbox")

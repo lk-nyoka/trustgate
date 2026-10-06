@@ -72,7 +72,7 @@ cd "C:\Users\ASUS\Desktop\Coding Projects\Build or Die\Week 3\Hackathon\paypal\t
 Expected result:
 
 ```text
-130 passed
+169 passed
 ```
 
 Avoid running `live_check.py` just to open the frontend; it creates real PayPal Sandbox payments and should only be used when you intentionally want to verify the live payment integration.
@@ -124,6 +124,19 @@ The judge-facing narrative is:
 When configured, the Anthropic assistant interprets the user's request and may call three tools: `search_products`, `get_product_details`, and `propose_purchase`. Without an API key, a scripted assistant demonstrates the same governed proposal path. In either mode, the scanner and deterministic policy run server-side, and authenticated human approval controls held payments.
 
 ---
+
+## AI policy authoring
+
+The console has a **"Write your policy in plain language"** panel. The user types something like *"Allow flights from approved airlines under $500. Ask me before spending more than $250. Never pay unrelated activation fees."* and an AI drafter (Anthropic tool use, forced single tool `submit_policy_draft`) proposes a partial policy. Without a model key a deterministic scripted drafter handles the same phrasing and the panel says so.
+
+The AI never has authority. Its output is only a proposal:
+
+1. `validate_draft` checks every field against the trusted registry (merchants, categories, currencies), hard caps ($2,000 per purchase, $10,000 total) and the rule that context checks can only `BLOCK` or `REQUIRE_APPROVAL`. Unknown fields such as `status` or `version`, unregistered merchants, negative amounts and `ALLOW` overrides are rejected.
+2. The user sees a diff of current vs. draft values, labelled *AI-generated draft policy · review before activation*.
+3. Only an authenticated human session (CSRF-protected; agent keys get 403) can click *Confirm and activate policy*, which creates a **new policy version**. Requests held under the old version can no longer be approved, and stale drafts are refused.
+4. Drafts and activations are written to the hash-chained audit log.
+
+The decision on every purchase remains deterministic code; the model only helps a person write the rules.
 
 ## Security model
 
@@ -219,7 +232,7 @@ python -m pytest -q
 
 ### Application and frontend verification
 
-- **130 tests passed** with `python -m pytest -q`
+- **169 tests passed** with `python -m pytest -q`
 - React production build succeeds with `npm run build` from `frontend/`
 - Desktop and mobile layouts checked; reduced-motion behavior is supported
 - Sign-in journey covers empty, invalid, valid, refresh, logout, back-cache protection, and eight-hour expiry

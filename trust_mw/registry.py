@@ -35,6 +35,15 @@ class Registry:
     def product(self, product_id):
         return self._products.get(product_id)
 
+    def merchant_ids(self):
+        return frozenset(self._merchants)
+
+    def categories(self):
+        return frozenset(m.category for m in self._merchants.values())
+
+    def currencies(self):
+        return frozenset(p.currency for p in self._products.values())
+
     def merchant_by_domain(self, host):
         for m in self._merchants.values():
             if host == m.domain or host.endswith("." + m.domain):

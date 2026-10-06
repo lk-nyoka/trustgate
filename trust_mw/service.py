@@ -114,6 +114,7 @@ class TrustService:
         self._intents = {}
         self._by_request = {}  # idempotency key -> (intent_id, canonical request hash)
         self._lock = threading.RLock()  # serialises propose/approve/decline/policy changes
+        self._drafts = {}  # draft_id -> reviewed-but-not-yet-activated policy draft
 
     # ---- human-only policy lifecycle -------------------------------------
     def confirm_policy(self, session_token, policy_id):
@@ -152,6 +153,43 @@ class TrustService:
             self.policies[policy_id] = replace(policy, status="ACTIVE", version=policy.version + 1)
             self.audit.append(None, "POLICY_RESUMED", {"policy_id": policy_id, "by": user,
                                                        "version": policy.version + 1})
+
+    def create_policy_draft(self, session_token, policy_id, fields, text, source):
+        """Store a VALIDATED draft for human review. Nothing changes until activate_policy_draft."""
+        from .policy_author import apply_draft, describe_changes, public_json
+        with self._lock:
+            user = self.auth.session_user(session_token)
+            policy = self.policies[policy_id]
+            if policy.user_id != user:
+                raise ApprovalError("NOT_POLICY_OWNER")
+            apply_draft(policy, fields)  # raises DraftError if the resulting policy would be inconsistent
+            draft_id = "pd_" + uuid.uuid4().hex[:12]
+            while len(self._drafts) >= 20:
+                self._drafts.pop(next(iter(self._drafts)))
+            self._drafts[draft_id] = {"policy_id": policy_id, "user": user, "fields": fields,
+                                      "base_version": policy.version}
+            self.audit.append(None, "POLICY_DRAFTED", {"draft_id": draft_id, "by": user, "source": source,
+                                                       "request_text": text[:600],
+                                                       "fields": public_json(fields)})
+            return draft_id, describe_changes(policy, fields)
+
+    def activate_policy_draft(self, session_token, draft_id):
+        """Human confirmation: the draft becomes a NEW policy version (older holds become unapprovable)."""
+        from .policy_author import apply_draft
+        with self._lock:
+            user = self.auth.session_user(session_token)
+            draft = self._drafts.get(draft_id)
+            if draft is None or draft["user"] != user:
+                raise ApprovalError("UNKNOWN_DRAFT")
+            policy = self.policies[draft["policy_id"]]
+            if policy.version != draft["base_version"]:
+                raise ApprovalError("DRAFT_STALE")
+            merged = apply_draft(policy, draft["fields"])
+            self.policies[policy.policy_id] = replace(policy, status="ACTIVE", version=policy.version + 1, **merged)
+            del self._drafts[draft_id]
+            self.audit.append(None, "POLICY_ACTIVATED_FROM_DRAFT",
+                              {"draft_id": draft_id, "by": user, "version": policy.version + 1})
+            return self.policies[policy.policy_id]
 
     # ---- agent surface ---------------------------------------------------
     @staticmethod

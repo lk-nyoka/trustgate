@@ -23,11 +23,53 @@ from pydantic import BaseModel, ConfigDict, Field, StrictInt
 
 from .landing import landing_page
 from .service import ApprovalError, AuthError, IdempotencyConflict
+from .policy_author import DraftError, ScriptedDrafter, describe_changes, public_json, validate_draft
 from .workspaces import RateLimited
 from .ui_shell import (CSS, EVENT_LABELS, BLOCK_LABELS, chip, checks_html,
                        flow_html, fmt_expiry, layout, reason_label, esc)
 
 COOKIE = "tm_session"
+
+AUTHORING_PANEL = """
+<div class="card" style="margin-top:16px">
+  <div class="card-title">Write your policy in plain language</div>
+  <p style="font-size:12px;color:var(--fg3);margin-bottom:8px">__MODE__ proposes a draft. Deterministic code validates it
+    against the trusted registry and hard caps. Only you can activate it, and nothing changes until you do.</p>
+  <textarea id="pa-text" rows="3" maxlength="600" style="width:100%;font:inherit;padding:8px 10px;border:1px solid var(--line);border-radius:var(--radius)"
+    placeholder="Let the agent book flights from approved airlines under $500. Ask me before spending more than $250. Never pay unrelated activation fees."></textarea>
+  <div class="row" style="margin-top:8px"><button type="button" class="btn btn-sm" id="pa-draft">Draft policy</button>
+    <span id="pa-msg" style="font-size:12px;color:var(--fg3)"></span></div>
+  <div id="pa-out" style="display:none;margin-top:12px;border:1px dashed var(--line);border-radius:var(--radius);padding:12px">
+    <div id="pa-label" style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:var(--warn);margin-bottom:8px"></div>
+    <table style="width:100%;font-size:12px;border-collapse:collapse" id="pa-table"></table>
+    <p style="font-size:11px;color:var(--fg3);margin:8px 0">Activating creates a new policy version. Requests held under the old version can no longer be approved.</p>
+    <button type="button" class="btn btn-primary btn-sm" id="pa-activate">Confirm and activate policy</button>
+  </div>
+</div>
+<script>
+(function(){
+  const csrf="__CSRF__", label="__LABEL__";
+  let draftId=null;
+  const msg=(t,bad)=>{const m=document.getElementById('pa-msg');m.textContent=t||'';m.style.color=bad?'var(--bad)':'var(--fg3)'};
+  const fmt=v=>typeof v==='object'?JSON.stringify(v):String(v);
+  async function post(url,body){const r=await fetch(url,{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});const d=await r.json();if(!r.ok)throw new Error(d.detail||'Request failed');return d}
+  document.getElementById('pa-draft').addEventListener('click',async()=>{
+    const text=document.getElementById('pa-text').value.trim(); if(!text){msg('Describe your policy first.',true);return}
+    msg('Drafting...');document.getElementById('pa-out').style.display='none';
+    try{const d=await post('/api/policy/draft',{text,csrf});draftId=d.draft_id;
+      document.getElementById('pa-label').textContent=label+' · review before activation';
+      const t=document.getElementById('pa-table');t.textContent='';
+      const head=t.insertRow();['Field','Current','Draft'].forEach(h=>{const c=document.createElement('th');c.textContent=h;c.style.textAlign='left';head.appendChild(c)});
+      if(!d.changes.length){const r=t.insertRow();const c=r.insertCell();c.colSpan=3;c.textContent='No change from the current policy.'}
+      d.changes.forEach(ch=>{const r=t.insertRow();[ch.field,fmt(ch.from),fmt(ch.to)].forEach(x=>{const c=r.insertCell();c.textContent=x;c.style.padding='3px 6px 3px 0'})});
+      document.getElementById('pa-out').style.display='block';msg('')}
+    catch(e){msg(e.message,true)}});
+  document.getElementById('pa-activate').addEventListener('click',async()=>{
+    try{await post('/api/policy/activate',{draft_id:draftId,csrf});location.reload()}catch(e){msg(e.message,true)}});
+})();
+</script>
+"""
+
 
 
 class PurchaseIntentIn(BaseModel):
@@ -275,13 +317,15 @@ body{{min-height:100%;background:var(--bg);padding:24px}}
 # ── App factory ───────────────────────────────────────────────────────────────
 
 def create_app(svc, users, csrf_secret, admin_key=None, cookie_secure=False,
-               paypal_mode="fake", demo_agent_key=None, assistant_runner=None, workspaces=None):
+               paypal_mode="fake", demo_agent_key=None, assistant_runner=None, workspaces=None,
+               policy_drafter=None):
     """users: {username: (user_id, password)}.
 
     workspaces: optional DemoWorkspaces. When given (hosted review mode) every login gets its own
     isolated TrustService and `svc` is ignored; all state below resolves per request."""
     app = FastAPI(title="TrustGate", docs_url=None, redoc_url=None)
     base_agent_key, base_runner = demo_agent_key, assistant_runner
+    drafter = policy_drafter or ScriptedDrafter()
     current_ws = contextvars.ContextVar("trustgate_workspace", default=None)
 
     class _Live:
@@ -689,6 +733,52 @@ def create_app(svc, users, csrf_secret, admin_key=None, cookie_secure=False,
         events = svc.get_audit(intent_id)
         return jsonable_encoder({"chain_valid": svc.audit.verify(), "events": events})
 
+    @app.post("/api/policy/draft")
+    async def api_policy_draft(request: Request):
+        if request.headers.get("authorization"):
+            return JSONResponse({"detail": "agent credentials cannot author policy"}, status_code=403)
+        token, user = human(request)
+        if not user:
+            return JSONResponse({"detail": "auth required"}, status_code=401)
+        body = await request.json()
+        if not csrf_ok(token, body.get("csrf")):
+            return JSONResponse({"detail": "bad CSRF token"}, status_code=403)
+        text = body.get("text")
+        if not isinstance(text, str) or not text.strip() or len(text) > 600:
+            return JSONResponse({"detail": "describe your policy in 1-600 characters"}, status_code=422)
+        if workspaces is not None and not workspaces.allow_chat(current_ws.get()):
+            return JSONResponse({"detail": "review workspace AI limit reached; reset the workspace"}, status_code=429)
+        policy = next((p for p in svc.policies.values() if p.user_id == user), None)
+        if policy is None:
+            return JSONResponse({"detail": "no policy to edit"}, status_code=404)
+        try:
+            fields = validate_draft(drafter.draft(text.strip(), svc.registry), svc.registry)
+            draft_id, changes = svc.create_policy_draft(token, policy.policy_id, fields, text.strip(), drafter.name)
+        except DraftError as exc:
+            return JSONResponse({"detail": "draft rejected: " + str(exc)}, status_code=422)
+        except ApprovalError as exc:
+            return JSONResponse({"detail": str(exc)}, status_code=409)
+        except Exception:
+            return JSONResponse({"detail": "drafting failed; no policy was changed"}, status_code=502)
+        return jsonable_encoder({"draft_id": draft_id, "source": drafter.name, "changes": changes,
+                                 "draft": public_json(fields), "base_version": policy.version})
+
+    @app.post("/api/policy/activate")
+    async def api_policy_activate(request: Request):
+        if request.headers.get("authorization"):
+            return JSONResponse({"detail": "agent credentials cannot activate policy"}, status_code=403)
+        token, user = human(request)
+        if not user:
+            return JSONResponse({"detail": "auth required"}, status_code=401)
+        body = await request.json()
+        if not csrf_ok(token, body.get("csrf")):
+            return JSONResponse({"detail": "bad CSRF token"}, status_code=403)
+        try:
+            policy = svc.activate_policy_draft(token, str(body.get("draft_id") or ""))
+        except (ApprovalError, DraftError) as exc:
+            return JSONResponse({"detail": str(exc)}, status_code=409)
+        return {"ok": True, "version": policy.version, "status": policy.status}
+
     @app.post("/api/policy/resume")
     async def api_resume(request: Request):
         token, user = human(request)
@@ -937,6 +1027,10 @@ def create_app(svc, users, csrf_secret, admin_key=None, cookie_secure=False,
             f'approvals and resets affect only this session.</p>'
         ) if workspaces is not None else ""
         policy_label = f"travel.v{policy.version}" if policy else "—"
+        authoring_html = (AUTHORING_PANEL
+                          .replace("__MODE__", "The AI assistant" if drafter.name == "ai" else "A scripted drafter (no model key configured)")
+                          .replace("__LABEL__", "AI-generated draft policy" if drafter.name == "ai" else "Scripted draft policy")
+                          .replace("__CSRF__", csrf_for(token)))
         blocked = stats.get("blocked", 0)
 
         stats_html = f"""
@@ -1095,6 +1189,7 @@ Developers give agents one governed purchase tool instead of raw PayPal payment 
   <div>
     <div class="card-title">Active spending policy</div>
     {policy_html}
+    {authoring_html}
   </div>
 </div>"""
         assistant_script = f"""<style>

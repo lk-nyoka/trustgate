@@ -275,6 +275,8 @@ EVENT_LABELS = {
     "APPROVAL_REFUSED_POLICY_CHANGED": ("Approval refused — policy changed",         "bad"),
     "APPROVAL_REFUSED_FACTS_CHANGED":  ("Approval refused — facts changed",          "bad"),
     "POLICY_REVOKED":                  ("Spending paused by user (kill switch)",     "bad"),
+    "POLICY_DRAFTED":                  ("Policy draft prepared for review",          "acc"),
+    "POLICY_ACTIVATED_FROM_DRAFT":     ("Policy activated from reviewed draft",      "ok"),
     "POLICY_RESUMED":                  ("Spending resumed by user (new policy version)", "ok"),
     "POLICY_CONFIRMED":                ("Policy confirmed",                          "ok"),
 }
