@@ -244,7 +244,7 @@ python -m pytest -q
 
 ## Which UI should judges use?
 
-The **server-rendered console** (`/console`, served by `trust_mw/api.py`) is the authoritative interface and the one deployed on Render. The React app in `frontend/` is an optional, experimental client for the same JSON API (`npm install && npm run build`, then open `/app`); it is not part of the hosted deployment path.
+The **server-rendered console** (`/console`, served by `trust_mw/api.py`) is the authoritative interface and the one deployed on Render. The hosted review experience uses the server-rendered console. The React app in `frontend/` is optional/experimental and is not required for the judge walkthrough; it is an optional client for the same JSON API (`npm install && npm run build`, then open `/app`); it is not part of the hosted deployment path.
 
 ## Review demo vs. PayPal Sandbox
 
@@ -320,6 +320,7 @@ python -m uvicorn trust_mw.demo_app:app --reload
 - Idempotency keys are bound to a canonical payload hash; reusing a `request_id` with a different payload returns HTTP 409
 - The scanner detects selected hidden-content and payment-instruction patterns (hidden JSON-LD, off-screen/CSS-hidden text, visible payment phrases). It is a defense-in-depth signal, not a general prompt-injection detector; HTML comments, `meta`/`alt` attributes and paraphrased instructions are not reliably detected
 - The demo's hostile source context is simulated and supplied to the agent; it is not an agent browsing arbitrary pages
+- Approval expiry: the policy default and the test suite use **10 minutes**; hosted review-demo workspaces deliberately seed **60 minutes** so reviewers have time to read the console. The 60-minute value is a demo convenience, not a production policy default
 - Hosted review demo state is in memory: each login gets its own isolated workspace (idle workspaces are evicted after 2 hours, at most 200 live, sign-ins and resets are rate-limited), but everything is lost when the free Render service sleeps or restarts
 
 - In-memory state — restart clears all intents

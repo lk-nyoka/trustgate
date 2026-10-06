@@ -32,6 +32,8 @@ class DictPages:
 
 
 def make_policy(**over):
+    # Default approval expiry is 10 minutes (tests rely on it). Hosted review-demo workspaces
+    # override it to 60 minutes (see workspaces.make_review_workspace_factory) purely for reviewer convenience.
     base = dict(policy_id="policy_trip", version=1, user_id="user_1", status="ACTIVE",
                 merchant_allowlist=frozenset({"merchant_demo_airlines"}),
                 category_allowlist=frozenset({"travel"}), currency_allowlist=frozenset({"USD"}),

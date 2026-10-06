@@ -65,6 +65,7 @@ def seed_demo_intents(svc, agent_key):
 
 
 def make_review_workspace_factory(assistant_factory=None, approval_expiry_minutes=60):
+    # 60 min is a review-demo convenience only; the policy default is 10 min (demo_data.make_policy).
     """Return factory() -> (svc, agent_key, assistant_runner, user_id) for a brand-new workspace.
 
     assistant_factory(svc, agent_key) -> runner, or None for the scripted demo agent."""
