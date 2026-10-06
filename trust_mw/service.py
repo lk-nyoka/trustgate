@@ -35,16 +35,19 @@ class PaymentResult:
 
 
 class AuthStore:
-    def __init__(self):
+    def __init__(self, session_ttl_seconds=8 * 60 * 60, clock=None):
         self._agents = {}    # api key -> (user_id, policy_id)
-        self._sessions = {}  # session token -> user_id
+        self._sessions = {}  # session token -> (user_id, expires_at)
+        self.session_ttl_seconds = session_ttl_seconds
+        self.clock = clock or (lambda: datetime.now(timezone.utc))
 
     def register_agent(self, api_key, user_id, policy_id):
         self._agents[api_key] = (user_id, policy_id)
 
     def issue_session(self, user_id):
         token = "sess_" + uuid.uuid4().hex
-        self._sessions[token] = user_id
+        expires_at = self.clock() + timedelta(seconds=self.session_ttl_seconds)
+        self._sessions[token] = (user_id, expires_at)
         return token
 
     def agent(self, api_key):
@@ -53,9 +56,17 @@ class AuthStore:
         return self._agents[api_key]
 
     def session_user(self, token):
-        if token not in self._sessions:
+        session = self._sessions.get(token)
+        if session is None:
             raise AuthError("not an authenticated human session")
-        return self._sessions[token]
+        user_id, expires_at = session
+        if self.clock() >= expires_at:
+            self._sessions.pop(token, None)
+            raise AuthError("human session expired")
+        return user_id
+
+    def revoke_session(self, token):
+        self._sessions.pop(token, None)
 
 
 class AuditLog:

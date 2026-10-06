@@ -8,7 +8,9 @@ import hashlib
 import hmac
 import html
 import json
+import re
 import secrets
+import uuid
 from typing import Optional
 
 from fastapi import FastAPI, Request
@@ -34,6 +36,18 @@ class PurchaseIntentIn(BaseModel):
     quantity:           StrictInt = 1
     source_url:         Optional[str] = Field(default=None, max_length=500)
     request_id:         str = Field(min_length=1, max_length=64)
+
+
+class AssistantProposalIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    product_reference: str = Field(max_length=100)
+    csrf: str = Field(min_length=1, max_length=128)
+
+
+class AssistantChatIn(BaseModel):
+  model_config = ConfigDict(extra="forbid")
+  message: str = Field(min_length=1, max_length=500)
+  csrf: str = Field(min_length=1, max_length=128)
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
@@ -120,12 +134,148 @@ def _timeline_items(events):
     return "".join(items)
 
 
+def _login_page(error_message=None, status_code=200):
+    error = (f'<div class="login-error" role="alert">{esc(error_message)}</div>'
+             if error_message else "")
+    return HTMLResponse(f"""<!doctype html><html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#f4f5f7">
+<title>Sign in · TrustGate</title>
+<style>
+{CSS}
+:root{{--ease-out:cubic-bezier(.23,1,.32,1)}}
+body{{min-height:100%;background:var(--bg);padding:24px}}
+.login-stage{{width:min(1180px,100%);min-height:min(760px,calc(100svh - 48px));margin:0 auto;
+  display:grid;grid-template-columns:minmax(0,1.08fr) minmax(390px,.92fr);overflow:hidden;
+  background:var(--surface);border:1px solid var(--line);border-radius:12px;
+  box-shadow:0 24px 70px rgba(15,17,23,.12)}}
+.login-story{{position:relative;isolation:isolate;overflow:hidden;display:flex;flex-direction:column;
+  justify-content:space-between;padding:38px 42px 30px;background:var(--sidebar);color:#f8fafc}}
+.login-story::before{{content:"";position:absolute;inset:0;z-index:-1;opacity:.16;
+  background-image:linear-gradient(rgba(226,232,240,.14) 1px,transparent 1px),
+    linear-gradient(90deg,rgba(226,232,240,.14) 1px,transparent 1px);background-size:36px 36px;
+  mask-image:linear-gradient(135deg,#000 0%,transparent 78%)}}
+.login-story::after{{content:"";position:absolute;z-index:-1;width:280px;height:280px;right:-150px;bottom:18%;
+  border:1px solid rgba(37,99,235,.36);border-radius:50%;box-shadow:0 0 0 34px rgba(37,99,235,.04),0 0 0 68px rgba(37,99,235,.035)}}
+.login-brand{{display:flex;align-items:center;gap:11px;animation:login-enter 620ms var(--ease-out) both}}
+.login-mark{{display:grid;place-items:center;width:36px;height:36px;border-radius:8px;background:var(--acc);
+  color:#fff;font-size:17px;font-weight:800}}
+.login-brand-name{{font-size:14px;font-weight:700;color:#f8fafc}}
+.login-brand-sub{{margin-top:1px;color:#94a3b8;font-size:10px;letter-spacing:.08em;text-transform:uppercase}}
+.story-copy{{max-width:570px;margin:56px 0 30px;animation:login-enter 680ms var(--ease-out) 70ms both}}
+.story-kicker{{display:flex;align-items:center;gap:8px;margin-bottom:16px;color:#93c5fd;
+  font-size:10px;font-weight:700;letter-spacing:.14em;text-transform:uppercase}}
+.story-kicker::before{{content:"";width:18px;height:2px;background:var(--acc)}}
+.story-copy h1{{font-family:Georgia,"Times New Roman",serif;font-size:clamp(34px,4.2vw,56px);font-weight:400;
+  line-height:1.04;margin:0 0 15px;color:#f8fafc}}
+.story-copy h1 span{{color:#60a5fa}}
+.story-copy p{{max-width:440px;color:#b6c0d0;font-size:13px;line-height:1.75}}
+.story-tagline{{margin:15px 0 5px;color:#f8fafc;font-size:12px;font-weight:700}}
+.story-value{{color:#94a3b8;font-size:11px;line-height:1.6}}
+.flow-visual{{max-width:580px;padding:17px 18px 14px;border:1px solid rgba(148,163,184,.2);
+  border-radius:8px;background:rgba(255,255,255,.035);animation:login-enter 680ms var(--ease-out) 140ms both}}
+.flow-caption{{display:flex;justify-content:space-between;align-items:center;gap:12px;color:#94a3b8;
+  font-size:9px;font-weight:700;letter-spacing:.1em;text-transform:uppercase}}
+.flow-health{{display:flex;align-items:center;gap:6px;color:#cbd5e1;letter-spacing:.02em;text-transform:none}}
+.flow-health i{{width:6px;height:6px;border-radius:50%;background:#34d399;box-shadow:0 0 10px rgba(52,211,153,.55)}}
+.flow-route{{position:relative;height:2px;margin:20px 9% 15px;background:rgba(148,163,184,.22)}}
+.flow-route::before{{content:"";position:absolute;inset:0;background:linear-gradient(90deg,transparent,rgba(37,99,235,.55),transparent)}}
+.flow-packet{{position:absolute;top:-1px;left:0;width:15%;height:4px;border-radius:8px;background:#60a5fa;
+  box-shadow:0 0 12px rgba(96,165,250,.9);animation:flow-pass 4.2s ease-in-out infinite}}
+.flow-nodes{{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;text-align:center}}
+.flow-node{{position:relative;display:grid;justify-items:center;gap:3px;color:#e2e8f0}}
+.login-story .flow-node{{min-width:0;flex:none;padding:0;border:0;border-radius:0;background:transparent;
+  color:#e2e8f0;font-size:inherit;font-weight:inherit;text-align:center}}
+.flow-node b{{font-size:11px}}
+.flow-node small{{color:#94a3b8;font-size:9px}}
+.flow-node-index{{display:grid;place-items:center;width:25px;height:25px;margin-bottom:3px;border:1px solid #475569;
+  border-radius:7px;color:#cbd5e1;font:10px ui-monospace,Consolas,monospace;background:#171b24}}
+.flow-node-gate .flow-node-index{{color:#bfdbfe;border-color:#2563eb;background:#17233b}}
+.story-foot{{display:flex;justify-content:space-between;gap:14px;margin-top:20px;color:#7f8da3;font-size:10px}}
+.login-main{{display:flex;align-items:center;justify-content:center;padding:46px 48px;background:var(--surface)}}
+.login-form-wrap{{width:min(360px,100%);animation:login-enter 680ms var(--ease-out) 120ms both}}
+.form-eyebrow{{margin-bottom:10px;color:var(--acc-dark);font-size:10px;font-weight:700;letter-spacing:.13em;text-transform:uppercase}}
+.login-form-wrap h2{{font-family:Georgia,"Times New Roman",serif;font-size:34px;font-weight:400;line-height:1.1;margin:0 0 9px}}
+.login-intro{{margin-bottom:28px;color:var(--fg2);font-size:13px;line-height:1.65}}
+.login-label{{display:block;margin:0 0 17px}}
+.login-label-text{{display:block;margin-bottom:6px;color:var(--fg2);font-size:11px;font-weight:650}}
+.login-input{{height:44px;padding:0 12px;border-color:#d9dee7;border-radius:6px;font-size:16px;transition:border-color 160ms ease,box-shadow 160ms ease}}
+.login-input:focus{{outline:none;border-color:var(--acc);box-shadow:0 0 0 3px rgba(37,99,235,.13)}}
+.login-submit{{width:100%;min-height:45px;justify-content:center;margin-top:4px;border-radius:6px;font-size:13px;font-weight:650}}
+.login-submit span{{transition:transform 180ms var(--ease-out)}}
+.login-error{{margin:0 0 18px;padding:10px 12px;border:1px solid #fecaca;border-radius:6px;background:var(--bad-light);
+  color:var(--bad-dark);font-size:12px}}
+.login-security{{display:flex;align-items:flex-start;gap:8px;margin-top:23px;padding-top:17px;border-top:1px solid var(--line2);
+  color:var(--fg3);font-size:10px;line-height:1.6}}
+.login-security b{{color:var(--fg2);font-weight:650}}
+.login-security-mark{{display:grid;place-items:center;width:17px;height:17px;flex:0 0 17px;border:1px solid #a7f3d0;
+  border-radius:50%;color:var(--ok);font-size:10px}}
+@keyframes login-enter{{from{{opacity:0;transform:translateY(12px)}}to{{opacity:1;transform:translateY(0)}}}}
+@keyframes flow-pass{{0%,12%{{opacity:0;transform:translateX(0)}}24%{{opacity:1}}80%{{opacity:.8;transform:translateX(540%)}}92%,100%{{opacity:0;transform:translateX(540%)}}}}
+@media(hover:hover) and (pointer:fine){{.login-submit:hover span{{transform:translateX(3px)}}}}
+@media(max-width:860px){{body{{padding:14px}}.login-stage{{min-height:calc(100svh - 28px);grid-template-columns:minmax(0,1fr) minmax(340px,.9fr)}}
+  .login-story{{padding:30px 28px 24px}}.login-main{{padding:34px 30px}}}}
+@media(max-width:680px){{body{{padding:0}}.login-stage{{width:100%;min-height:100svh;grid-template-columns:1fr;border:0;border-radius:0;box-shadow:none}}
+  .login-story{{min-height:440px;padding:26px 23px 20px}}.story-copy{{margin:42px 0 22px}}
+  .story-copy h1{{font-size:40px}}.flow-visual{{padding:14px 12px 12px}}.flow-caption{{font-size:8px}}
+  .login-main{{padding:38px 24px 44px}}.login-form-wrap h2{{font-size:31px}}}}
+@media(max-width:390px){{.login-story{{min-height:420px;padding-inline:18px}}.story-copy h1{{font-size:35px}}
+  .story-foot{{font-size:9px}}.login-main{{padding-inline:19px}}}}
+@media(prefers-reduced-motion:reduce){{.login-brand,.story-copy,.flow-visual,.login-form-wrap{{animation:login-fade 180ms ease-out both}}
+  .flow-packet{{animation:none;opacity:.9;transform:translateX(270%)}}}}
+@keyframes login-fade{{from{{opacity:0}}to{{opacity:1}}}}
+</style></head><body>
+<main class="login-stage">
+  <section class="login-story" aria-label="TrustGate purchase authorization flow">
+    <div class="login-brand"><span class="login-mark" aria-hidden="true">T</span><div>
+      <div class="login-brand-name">TrustGate</div><div class="login-brand-sub">Trust middleware</div>
+    </div></div>
+    <div class="story-copy">
+      <div class="story-kicker">Trust infrastructure for autonomous commerce</div>
+      <h1>AI may recommend.<br><span>Only policy may authorize.</span></h1>
+      <div class="story-tagline">Let AI find it. Let policy decide. Let PayPal pay.</div>
+      <p class="story-value">TrustGate governs every AI-proposed purchase before PayPal execution.</p>
+    </div>
+    <div>
+      <div class="flow-visual">
+        <div class="flow-caption"><span>Purchase authorization path</span><span class="flow-health"><i></i>Policy active</span></div>
+        <div class="flow-route" aria-hidden="true"><span class="flow-packet"></span></div>
+        <div class="flow-nodes">
+          <div class="flow-node"><span class="flow-node-index">01</span><b>AI agent</b><small>proposes</small></div>
+          <div class="flow-node flow-node-gate"><span class="flow-node-index">02</span><b>TrustGate</b><small>authorizes</small></div>
+          <div class="flow-node"><span class="flow-node-index">03</span><b>PayPal</b><small>only if allowed</small></div>
+        </div>
+      </div>
+      <div class="story-foot"><span>DETERMINISTIC POLICY</span><span>HUMAN APPROVAL</span><span>AUDIT EVIDENCE</span></div>
+    </div>
+  </section>
+  <section class="login-main" aria-labelledby="login-heading">
+    <div class="login-form-wrap">
+      <div class="form-eyebrow">Policy owner access</div>
+      <h2 id="login-heading">Welcome back</h2>
+      <p class="login-intro">Sign in to review purchase proposals and manage your spending policy.</p>
+      {error}
+      <form method="post" action="/login">
+        <label class="login-label"><span class="login-label-text">Username</span>
+          <input class="login-input" name="username" autocomplete="username" required></label>
+        <label class="login-label"><span class="login-label-text">Password</span>
+          <input class="login-input" name="password" type="password" autocomplete="current-password" required></label>
+        <button class="btn btn-primary login-submit" type="submit">Sign in <span aria-hidden="true">→</span></button>
+      </form>
+      <div class="login-security"><span class="login-security-mark" aria-hidden="true">✓</span>
+        <span><b>Payment authority stays protected.</b> An agent can propose a purchase, but only policy and authenticated approval can authorize it.</span>
+      </div>
+    </div>
+  </section>
+</main></body></html>""", status_code=status_code)
+
+
 # ── App factory ───────────────────────────────────────────────────────────────
 
 def create_app(svc, users, csrf_secret, admin_key=None, cookie_secure=False,
-               paypal_mode="fake"):
+               paypal_mode="fake", demo_agent_key=None, assistant_runner=None):
     """users: {username: (user_id, password)}."""
-    app = FastAPI(title="Trust Middleware", docs_url=None, redoc_url=None)
+    app = FastAPI(title="TrustGate", docs_url=None, redoc_url=None)
     auth = svc.auth
 
     # CORS — allow the React dev server (port 5173) and same origin
@@ -137,6 +287,13 @@ def create_app(svc, users, csrf_secret, admin_key=None, cookie_secure=False,
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+    @app.middleware("http")
+    async def disable_private_response_caching(request: Request, call_next):
+        response = await call_next(request)
+        if request.url.path.startswith(("/api/", "/console", "/intents", "/approvals", "/audit")):
+            response.headers["Cache-Control"] = "no-store, private, max-age=0"
+        return response
 
     def csrf_for(token):
         return hmac.new(csrf_secret.encode(), token.encode(), hashlib.sha256).hexdigest()
@@ -160,7 +317,7 @@ def create_app(svc, users, csrf_secret, admin_key=None, cookie_secure=False,
     def err(detail, status):
         return JSONResponse({"detail": detail}, status_code=status)
 
-    def page(title, body, active_nav, token):
+    def page(title, body, active_nav, token, extra_head=""):
         stats = svc.stats()
         # append logout form link into the topbar via extra_head JS is messy —
         # instead we put a tiny logout link inside the sidebar user block
@@ -168,7 +325,7 @@ def create_app(svc, users, csrf_secret, admin_key=None, cookie_secure=False,
                        f'<input type="hidden" name="csrf" value="{csrf_for(token)}"></form>')
         body_with_logout = body + logout_form
         return layout(title, body_with_logout, active_nav=active_nav,
-                      paypal_mode=paypal_mode, stats=stats)
+                      paypal_mode=paypal_mode, stats=stats, extra_head=extra_head)
 
     # ── Public routes ──────────────────────────────────────────────────────
     @app.get("/", response_class=HTMLResponse)
@@ -177,55 +334,18 @@ def create_app(svc, users, csrf_secret, admin_key=None, cookie_secure=False,
 
     @app.get("/login", response_class=HTMLResponse)
     def login_form():
-        return HTMLResponse(f"""<!doctype html><html lang="en"><head>
-<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Sign in · TrustMiddleware</title>
-<style>
-{CSS}
-body{{display:flex;align-items:center;justify-content:center;min-height:100vh;
-  background:var(--sidebar)}}
-.login-box{{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius-lg);
-  padding:36px 40px;width:360px;box-shadow:0 20px 60px rgba(0,0,0,.3)}}
-.login-logo{{display:flex;align-items:center;gap:10px;margin-bottom:28px}}
-.login-logo .logo-icon{{width:32px;height:32px;border-radius:8px;background:var(--acc);
-  display:flex;align-items:center;justify-content:center;font-weight:800;color:#fff;font-size:16px}}
-.login-logo .logo-name{{font-weight:700;font-size:15px}}
-.login-logo .logo-sub{{font-size:11px;color:var(--fg3)}}
-label{{display:block;margin-bottom:16px}}
-.label-text{{font-size:12px;font-weight:600;color:var(--fg2);margin-bottom:5px}}
-</style></head><body>
-<div class="login-box">
-  <div class="login-logo">
-    <div class="logo-icon">T</div>
-    <div><div class="login-logo logo-name" style="margin:0">TrustMiddleware</div>
-    <div class="logo-sub">Autonomous commerce</div></div>
-  </div>
-  <h2 style="font-size:18px;margin-bottom:6px">Sign in</h2>
-  <p style="color:var(--fg3);font-size:13px;margin-bottom:24px">
-    Approve or decline purchases your agent proposes.</p>
-  <form method="post" action="/login">
-    <label><div class="label-text">Username</div>
-    <input name="username" autocomplete="username" autofocus></label>
-    <label><div class="label-text">Password</div>
-    <input name="password" type="password" autocomplete="current-password"></label>
-    <button class="btn btn-primary" style="width:100%;justify-content:center;margin-top:4px">
-      Sign in →</button>
-  </form>
-</div></body></html>""")
+        return _login_page()
 
     @app.post("/login")
     async def login(request: Request):
         form = await request.form()
         entry = users.get(form.get("username") or "")
         if not entry or not hmac.compare_digest(entry[1], form.get("password") or ""):
-            return HTMLResponse(f"""<!doctype html><html><head><meta charset="utf-8">
-<style>{CSS} body{{display:flex;align-items:center;justify-content:center;min-height:100vh;background:var(--sidebar)}}</style>
-</head><body><div style="background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:32px 40px;width:340px;text-align:center">
-<p style="color:var(--bad);margin-bottom:16px">Wrong username or password.</p>
-<a class="btn btn-primary" href="/login">Try again</a></div></body></html>""", status_code=401)
+          return _login_page("Wrong username or password.", status_code=401)
         resp = RedirectResponse("/console", status_code=303)
         resp.set_cookie(COOKIE, auth.issue_session(entry[0]),
-                        httponly=True, samesite="strict", secure=cookie_secure)
+                        httponly=True, samesite="strict", secure=cookie_secure,
+                        max_age=auth.session_ttl_seconds)
         return resp
 
     @app.post("/logout")
@@ -234,6 +354,7 @@ label{{display:block;margin-bottom:16px}}
         resp = RedirectResponse("/login", status_code=303)
         form = await request.form()
         if user and csrf_ok(token, form.get("csrf")):
+            auth.revoke_session(token)
             resp.delete_cookie(COOKIE)
         return resp
 
@@ -253,15 +374,20 @@ label{{display:block;margin-bottom:16px}}
         token = auth.issue_session(entry[0])
         resp = JSONResponse({"ok": True, "csrf": csrf_for(token)})
         resp.set_cookie(COOKIE, token, httponly=True, samesite="lax",
-                        secure=cookie_secure)
+                        secure=cookie_secure, max_age=auth.session_ttl_seconds)
         return resp
 
     @app.post("/api/logout")
     async def api_logout(request: Request):
         token, user = human(request)
+        if not user:
+            return JSONResponse({"detail": "auth required"}, status_code=401)
+        body = await request.json()
+        if not csrf_ok(token, body.get("csrf")):
+            return JSONResponse({"detail": "bad CSRF token"}, status_code=403)
+        auth.revoke_session(token)
         resp = JSONResponse({"ok": True})
-        if user:
-            resp.delete_cookie(COOKIE)
+        resp.delete_cookie(COOKIE)
         return resp
 
     @app.get("/api/me")
@@ -277,6 +403,7 @@ label{{display:block;margin-bottom:16px}}
             "user_id": user,
             "csrf": csrf,
             "paypal_mode": paypal_mode,
+            "assistant_mode": "anthropic" if assistant_runner else "scripted",
             "stats": stats,
             "policy": {
                 "policy_id": policy.policy_id,
@@ -290,6 +417,122 @@ label{{display:block;margin-bottom:16px}}
                 "approval_expiry_minutes": policy.approval_expiry_minutes,
             } if policy else None,
         }
+
+    @app.get("/api/assistant/products")
+    def assistant_products(request: Request, q: str = ""):
+        _, user = human(request)
+        if not user:
+            return JSONResponse({"detail": "auth required"}, status_code=401)
+        query = q.lower()
+        fee_search = any(word in query for word in ("fee", "activation", "injected"))
+        budget = None
+        for marker in ("under", "below", "less than"):
+            if marker in query:
+                tail = query.split(marker, 1)[1]
+                match = re.search(r"\$?\s*(\d+(?:\.\d+)?)", tail)
+                if match:
+                    budget = float(match.group(1))
+                break
+        refs = ("cpt-jnb-economy-180", "cpt-jnb-flex-320", "cpt-jnb-business-900",
+                "cpt-jnb-eur-100", "activation-fee-3")
+        products = []
+        for product_ref in refs:
+            product = svc.registry.product(product_ref)
+            merchant = svc.registry.merchant(product.merchant_id) if product else None
+            if not product or not merchant:
+                continue
+            if fee_search != (merchant.category != "travel"):
+                continue
+            if any(term in query for term in ("flight", "johannesburg", "cpt", "jnb")) and product.currency != "USD":
+                continue
+            if budget is not None and float(product.unit_amount) > budget:
+                continue
+            products.append({
+                "merchant_reference": merchant.merchant_id,
+                "merchant": merchant.name,
+                "product_reference": product.product_id,
+                "display_name": product.name,
+                "display_amount": str(product.unit_amount),
+                "currency": product.currency,
+                "category": merchant.category,
+            })
+        return {"products": products}
+
+    @app.get("/api/assistant/products/{product_reference}")
+    def assistant_product_detail(product_reference: str, request: Request):
+        _, user = human(request)
+        if not user:
+            return JSONResponse({"detail": "auth required"}, status_code=401)
+        product = svc.registry.product(product_reference)
+        if not product:
+            return JSONResponse({"detail": "product not found"}, status_code=404)
+        merchant = svc.registry.merchant(product.merchant_id)
+        return {
+            "merchant_reference": merchant.merchant_id,
+            "merchant": merchant.name,
+            "product_reference": product.product_id,
+            "display_name": product.name,
+            "display_amount": str(product.unit_amount),
+            "currency": product.currency,
+            "category": merchant.category,
+            "registered_domain": merchant.domain,
+        }
+
+    @app.post("/api/assistant/propose")
+    async def assistant_propose(body: AssistantProposalIn, request: Request):
+        if request.headers.get("authorization"):
+            return JSONResponse({"detail": "agent credentials are not accepted on the human demo surface"},
+                                status_code=403)
+        token, user = human(request)
+        if not user:
+            return JSONResponse({"detail": "auth required"}, status_code=401)
+        if not csrf_ok(token, body.csrf):
+            return JSONResponse({"detail": "bad CSRF token"}, status_code=403)
+        if not demo_agent_key:
+            return JSONResponse({"detail": "demo agent is not configured"}, status_code=503)
+        try:
+            agent_user, _ = auth.agent(demo_agent_key)
+        except AuthError:
+            return JSONResponse({"detail": "demo agent is not configured"}, status_code=503)
+        if agent_user != user:
+            return JSONResponse({"detail": "demo agent is not bound to this user"}, status_code=403)
+        product = svc.registry.product(body.product_reference)
+        if not product:
+            return JSONResponse({"detail": "product not found"}, status_code=404)
+        source_url = ("https://demo-airlines.test/injected-fee"
+                      if product.product_id == "activation-fee-3"
+                      else "https://demo-airlines.test/checkout")
+        result = svc.propose_purchase(
+            demo_agent_key,
+            product.merchant_id,
+            product.product_id,
+            quantity=1,
+            source_url=source_url,
+            request_id="console-" + uuid.uuid4().hex,
+        )
+        result["approval_url"] = (f"/approvals/{result['intent_id']}"
+                                  if result["state"] == "HELD_FOR_APPROVAL" else None)
+        return jsonable_encoder(result)
+
+    @app.post("/api/assistant/chat")
+    def assistant_chat(body: AssistantChatIn, request: Request):
+        token, user = human(request)
+        if not user:
+            return JSONResponse({"detail": "auth required"}, status_code=401)
+        if not csrf_ok(token, body.csrf):
+            return JSONResponse({"detail": "bad CSRF token"}, status_code=403)
+        if not assistant_runner:
+            return JSONResponse({"detail": "language model is not configured"}, status_code=503)
+        try:
+            agent_user, _ = auth.agent(demo_agent_key)
+        except AuthError:
+            return JSONResponse({"detail": "demo agent is not configured"}, status_code=503)
+        if agent_user != user:
+            return JSONResponse({"detail": "demo agent is not bound to this user"}, status_code=403)
+        try:
+            return jsonable_encoder(assistant_runner.run(user, body.message))
+        except Exception:
+            return JSONResponse({"detail": "assistant request failed; no action was confirmed"}, status_code=502)
 
     @app.get("/api/intents")
     def api_intents(request: Request):
@@ -526,7 +769,7 @@ label{{display:block;margin-bottom:16px}}
     <div class="stat-sub">via governed flow</div>
   </div>
   <div class="stat-card">
-    <div class="stat-label">PayPal bypass attempts</div>
+    <div class="stat-label">Unsafe proposals blocked</div>
     <div class="stat-value" style="color:var(--bad)">{blocked:02d}</div>
     <div class="stat-sub">blocked before order</div>
   </div>
@@ -561,7 +804,7 @@ label{{display:block;margin-bottom:16px}}
   <div class="row-between mb-4">
     <span style="font-size:10px;font-weight:600;color:var(--fg3);text-transform:uppercase;
       letter-spacing:.08em">{num}</span>
-    <span style="width:8px;height:8px;border-radius:50%;background:{dot_color};display:inline-block"></span>
+    {chip(verdict.replace(" ", "_"))}
   </div>
   <div style="font-weight:700;font-size:14px;margin-bottom:2px">{esc(name)}</div>
   <div class="row-between">
@@ -602,29 +845,202 @@ label{{display:block;margin-bottom:16px}}
 </div>"""
 
         body = f"""
-<div class="page-eyebrow">Trust boundary / Live demo</div>
+<div class="page-eyebrow">TrustGate / Live console</div>
 <h1 class="page-headline">
-  The agent can propose.<br>
-  <span class="hl-acc">It cannot authorize.</span>
+  Let AI find it.<br>
+  <span class="hl-acc">Let policy decide.</span>
 </h1>
-<p class="page-lead">Trust Middleware turns an AI recommendation into a governed purchase intent.
-Watch trusted facts, deterministic policy, and human authority decide what reaches PayPal.</p>
+<p class="page-lead">TrustGate turns an AI recommendation into a verified purchase intent—and stops it before PayPal when policy does not authorize it.
+Developers give agents one governed purchase tool instead of raw PayPal payment tools.</p>
 {banner}
+<div class="assistant-grid">
+  <section class="assistant-panel">
+    <div class="assistant-head">
+      <div><div class="assistant-kicker">AI purchase assistant</div>
+        <div class="assistant-subtitle">Search registry products, inspect trusted facts, then send a governed proposal.</div></div>
+      <span class="demo-agent-tag">{'Anthropic tool agent' if assistant_runner else 'Scripted demo agent'}</span>
+    </div>
+    <div class="agent-note">{'The model can only search products, inspect registry facts, and submit governed proposals. TrustGate still controls authorization.' if assistant_runner else 'This local walkthrough uses a scripted agent, not a live language model. Every proposal still passes through TrustGate policy.'}</div>
+    <div class="agent-thread" id="agent-thread" aria-live="polite">
+      <div class="agent-message user"><span>You</span><p>Book me a direct flight to Johannesburg under $500. Ask me above $250.</p></div>
+      <div class="agent-message"><span>Agent</span><p>{'Ready to search the registered catalog. Any purchase proposal will pass through TrustGate policy.' if assistant_runner else 'I found two registered Demo Airlines options. The $180 fare is within the automatic limit; the $320 fare needs your approval.'}</p></div>
+    </div>
+    <div id="agent-results" class="agent-results" aria-live="polite"><div class="agent-loading">Searching the product registry…</div></div>
+    <form id="agent-request-form" class="agent-form">
+      <label class="sr-only" for="agent-request">Purchase request</label>
+      <input id="agent-request" name="request" maxlength="240" placeholder="Try: Find a direct flight under $500" autocomplete="off">
+      <button class="btn btn-primary" type="submit">Search products</button>
+    </form>
+  </section>
+  <aside class="governance-panel">
+    <div class="assistant-kicker">TrustGate evaluation</div>
+    <div class="governance-subtitle">The agent recommends. The middleware authorizes.</div>
+    <ol class="governance-steps" id="governance-steps">
+      <li><span>1</span><div><b>Agent proposal</b><small>Waiting for product selection</small></div></li>
+      <li><span>2</span><div><b>Trusted facts</b><small>Resolved from the product registry</small></div></li>
+      <li><span>3</span><div><b>Policy decision</b><small>Deterministic; amount and payee are not agent inputs</small></div></li>
+      <li><span>4</span><div><b>Human approval</b><small>Required above ${esc(str(policy.auto_approve_up_to)) if policy else '250'}</small></div></li>
+    </ol>
+    <div class="decision-box" id="decision-box">
+      <div class="assistant-kicker">Decision</div><strong id="decision-value">Waiting for proposal</strong>
+      <p id="decision-reason">No payment has been attempted.</p>
+      <p id="approval-value">Approval: not requested</p>
+      <a id="approval-link" class="btn btn-primary" href="#" hidden>Review purchase</a>
+    </div>
+    <div class="payment-box">
+      <div class="assistant-kicker">PayPal execution</div><strong id="payment-state">NOT STARTED</strong>
+      <p id="payment-detail">A payment begins only after policy authorizes it.</p>
+    </div>
+  </aside>
+</div>
 {stats_html}
 <div class="split">
   <div>
-    <div class="card-title">01 / Run the story</div>
+    <div class="card-title">Live agent activity</div>
     {"".join(story_cards)}
   </div>
   <div>
-    <div class="card-title">02 / Authority</div>
+    <div class="card-title">Active spending policy</div>
     {policy_html}
   </div>
 </div>"""
-
-        return HTMLResponse(page("Command Center", body, "console", token))
+        assistant_script = f"""<style>
+.assistant-grid{{display:grid;grid-template-columns:minmax(0,1.25fr) minmax(320px,.75fr);gap:14px;margin:0 0 24px;align-items:stretch}}
+.assistant-panel,.governance-panel{{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:20px;min-width:0}}
+.assistant-head{{display:flex;justify-content:space-between;align-items:flex-start;gap:12px}}
+.assistant-kicker{{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:var(--fg3)}}
+.assistant-subtitle,.governance-subtitle{{font-size:12px;color:var(--fg2);margin:5px 0 0}}
+.demo-agent-tag{{font-size:10px;font-weight:700;text-transform:uppercase;color:var(--warn-dark);background:var(--warn-light);padding:5px 8px;border-radius:5px;white-space:nowrap}}
+.agent-note{{margin-top:12px;padding:9px 11px;background:var(--surface2);border-left:2px solid var(--warn);color:var(--fg2);font-size:11px}}
+.agent-thread{{display:grid;gap:9px;margin:14px 0 10px;max-height:170px;overflow:auto}}
+.agent-message{{max-width:94%;background:var(--surface2);padding:9px 11px;border-radius:7px;font-size:12px}}
+.agent-message.user{{justify-self:end;background:var(--acc-light)}}
+.agent-message span{{display:block;font-size:10px;font-weight:700;color:var(--fg3);margin-bottom:3px}}
+.agent-message p{{margin:0;color:var(--fg)}}
+.agent-results{{display:grid;gap:7px;margin:12px 0}}
+.agent-product{{display:flex;justify-content:space-between;align-items:center;gap:12px;border:1px solid var(--line);padding:10px 11px;border-radius:6px}}
+.agent-product h3{{font-size:12px;margin:0 0 2px}}.agent-product p{{font-size:11px;color:var(--fg3);margin:0}}
+.agent-product strong{{white-space:nowrap;font-size:13px}}
+.agent-product-actions{{display:flex;align-items:center;gap:8px}}
+.agent-form{{display:flex;gap:8px;align-items:center}}.agent-form input{{min-width:0}}
+.agent-loading,.agent-empty{{padding:10px;color:var(--fg3);font-size:12px}}
+.governance-steps{{list-style:none;margin:17px 0;padding:0;display:grid;gap:11px}}
+.governance-steps li{{display:flex;align-items:flex-start;gap:10px}}
+.governance-steps li>span{{display:grid;place-items:center;width:20px;height:20px;flex:0 0 20px;border-radius:50%;background:var(--acc-light);color:var(--acc-dark);font-size:10px;font-weight:700}}
+.governance-steps b,.decision-box strong,.payment-box strong{{font-size:12px;display:block}}
+.governance-steps small{{display:block;color:var(--fg3);font-size:11px;margin-top:2px}}
+.decision-box,.payment-box{{border-top:1px solid var(--line);padding-top:13px;margin-top:13px}}
+.decision-box strong,.payment-box strong{{margin-top:5px}}
+.decision-box p,.payment-box p{{font-size:11px;color:var(--fg2);margin:4px 0 0}}
+.decision-box[data-decision="ALLOW"] strong,.payment-box[data-state="CAPTURED"] strong{{color:var(--ok)}}
+.decision-box[data-decision="APPROVAL_REQUIRED"] strong{{color:var(--warn)}}
+.decision-box[data-decision="BLOCK"] strong,.payment-box[data-state="NOT REACHED"] strong{{color:var(--bad)}}
+.sr-only{{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}}
+@media(max-width:900px){{.assistant-grid{{grid-template-columns:1fr}}}}
+@media(max-width:600px){{.assistant-panel,.governance-panel{{padding:15px}}.assistant-head{{flex-direction:column}}.agent-form{{align-items:stretch;flex-direction:column}}.agent-form .btn{{justify-content:center}}.agent-product{{align-items:flex-start;flex-direction:column}}}}
+</style>
+<script>
+(()=>{{
+  const csrf={json.dumps(csrf_for(token))};
+  const thread=document.getElementById('agent-thread');
+  const results=document.getElementById('agent-results');
+  const form=document.getElementById('agent-request-form');
+  const requestInput=document.getElementById('agent-request');
+  const decisionBox=document.getElementById('decision-box');
+  const approvalLink=document.getElementById('approval-link');
+  const modelEnabled={json.dumps(bool(assistant_runner))};
+  let approvalPoll;
+  const money=(amount,currency)=>new Intl.NumberFormat('en-US',{{style:'currency',currency}}).format(Number(amount));
+  function message(role,text,isUser=false){{const wrap=document.createElement('div');wrap.className='agent-message'+(isUser?' user':'');const name=document.createElement('span');name.textContent=role;const body=document.createElement('p');body.textContent=text;wrap.append(name,body);thread.append(wrap);thread.scrollTop=thread.scrollHeight}}
+  function button(label,action){{const el=document.createElement('button');el.type='button';el.className='btn btn-sm';el.textContent=label;el.addEventListener('click',action);return el}}
+  async function getJSON(url,options={{}}){{const response=await fetch(url,{{credentials:'same-origin',...options}});const data=await response.json();if(!response.ok)throw new Error(data.detail||'Request failed');return data}}
+  function watchApproval(intentId){{
+    clearInterval(approvalPoll);
+    approvalPoll=setInterval(async()=>{{
+      try{{
+        const updated=await getJSON('/api/intents/'+encodeURIComponent(intentId));
+        if(updated.state==='HELD_FOR_APPROVAL')return;
+        clearInterval(approvalPoll);
+        document.getElementById('approval-value').textContent='Approval: '+updated.approval_status;
+        const finalPayment=updated.state==='BLOCKED'?'NOT REACHED':updated.state;
+        const paymentBox=document.querySelector('.payment-box');paymentBox.dataset.state=finalPayment;
+        document.getElementById('payment-state').textContent=finalPayment;
+        document.getElementById('payment-detail').textContent=updated.state==='CAPTURED'?'Order '+updated.order_id+' · Capture '+updated.capture_id:'No PayPal payment was captured.';
+        approvalLink.hidden=true;
+        if(updated.state==='CAPTURED')message('Agent','Approved and purchased. Capture ID: '+updated.capture_id);
+        else message('Agent','The purchase was not approved. No PayPal payment was captured.');
+      }}catch(error){{clearInterval(approvalPoll)}}
+    }},2000);
+  }}
+  function showIntent(detail,approvalUrl){{
+    decisionBox.dataset.decision=detail.decision;
+    document.getElementById('decision-value').textContent=detail.decision.replaceAll('_',' ');
+    document.getElementById('decision-reason').textContent=(detail.reasons||[]).map(code=>code.replaceAll('_',' ').toLowerCase()).join('; ')||'Policy authorized this proposal.';
+    document.getElementById('approval-value').textContent='Approval: '+detail.approval_status;
+    const paymentState=detail.state==='BLOCKED'?'NOT REACHED':detail.state==='HELD_FOR_APPROVAL'?'NOT STARTED':detail.state;
+    const paymentBox=document.querySelector('.payment-box');paymentBox.dataset.state=paymentState;
+    document.getElementById('payment-state').textContent=paymentState;
+    const paymentDetail=detail.state==='BLOCKED'?'Blocked by policy. No PayPal order was created.':detail.state==='HELD_FOR_APPROVAL'?'Waiting for authenticated human approval. No PayPal order was created.':detail.order_id?'Order '+detail.order_id+' · Capture '+detail.capture_id:'Purchase execution finished.';
+    document.getElementById('payment-detail').textContent=paymentDetail;
+    if(approvalUrl){{approvalLink.href=approvalUrl;approvalLink.hidden=false;watchApproval(detail.intent_id)}}
+  }}
+  async function runModel(query){{
+    message('Agent','Checking the request and available products…');
+    try{{
+      const data=await getJSON('/api/assistant/chat',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{message:query,csrf}})}});
+      data.tool_calls.forEach(call=>message('Agent tool · '+call.name,call.ok?'Completed by the server-side agent.':'Tool rejected.'));
+      if(data.intent)showIntent(data.intent,data.approval_url);
+      message('Agent',data.answer);
+    }}catch(error){{message('Assistant error',error.message)}}
+  }}
+  async function search(query){{
+    results.replaceChildren(Object.assign(document.createElement('div'),{{className:'agent-loading',textContent:'Searching registered products…'}}));
+    try{{const data=await getJSON('/api/assistant/products?q='+encodeURIComponent(query));results.replaceChildren();
+      if(!data.products.length){{results.textContent='No registered products match that request.';results.className='agent-results agent-empty';return}}
+      results.className='agent-results';
+      data.products.forEach(product=>{{
+        const row=document.createElement('article');row.className='agent-product';
+        const details=document.createElement('div');const name=document.createElement('h3');name.textContent=product.display_name;const merchant=document.createElement('p');merchant.textContent=product.merchant+' · '+product.category;details.append(name,merchant);
+        const actions=document.createElement('div');actions.className='agent-product-actions';const price=document.createElement('strong');price.textContent=money(product.display_amount,product.currency);
+        const inspect=button('Inspect',async()=>{{
+          inspect.disabled=true;inspect.textContent='Inspecting…';
+          try{{const verified=await getJSON('/api/assistant/products/'+encodeURIComponent(product.product_reference));
+            message('Agent tool · get_product_details',verified.display_name+' · '+money(verified.display_amount,verified.currency)+' · Payee: '+verified.merchant+'. Amount and payee are resolved by the registry.');
+            const propose=button('Propose purchase',()=>submitProposal(verified,propose));actions.replaceChildren(price,propose);
+          }}catch(error){{inspect.disabled=false;inspect.textContent='Inspect';message('Tool error',error.message)}}
+        }});
+        actions.append(price,inspect);row.append(details,actions);results.append(row);
+      }});
+    }}catch(error){{results.textContent=error.message;results.className='agent-results agent-empty'}}
+  }}
+  async function submitProposal(product,buttonEl){{
+    clearInterval(approvalPoll);
+    buttonEl.disabled=true;buttonEl.textContent='Sending proposal…';
+    message('Agent tool · propose_purchase','Submitting only the registered product reference. TrustGate supplies the trusted amount and payee.');
+    document.getElementById('decision-value').textContent='Evaluating proposal';
+    document.getElementById('decision-reason').textContent='Resolving trusted facts and checking policy…';
+    document.getElementById('payment-state').textContent='NOT STARTED';
+    document.getElementById('payment-detail').textContent='Payment execution waits for the TrustGate decision.';
+    try{{const result=await getJSON('/api/assistant/propose',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{product_reference:product.product_reference,csrf}})}});
+      const detail=await getJSON('/api/intents/'+encodeURIComponent(result.intent_id));
+      showIntent(detail,result.approval_url);
+      const responseText=result.decision==='APPROVAL_REQUIRED'?'This purchase needs your approval before payment.':result.decision==='BLOCK'?'I stopped this proposal. No PayPal order was created.':detail.state==='CAPTURED'?'Policy authorized the purchase and payment was captured.':'The proposal was evaluated by TrustGate.';
+      message('Agent',responseText);
+      buttonEl.textContent='Proposal sent';
+    }}catch(error){{buttonEl.disabled=false;buttonEl.textContent='Try proposal again';message('Tool error',error.message)}}
+  }}
+  form.addEventListener('submit',event=>{{event.preventDefault();const query=requestInput.value.trim()||'direct flight under $500';message('You',query,true);requestInput.value='';if(modelEnabled)runModel(query);else{{message('Agent tool · search_products','Searching the registered catalog. The local demo agent is scripted; it does not call a language model.');search(query)}}}});
+  if(!modelEnabled)search('direct flight under $500');
+}})();
+</script>"""
+        return HTMLResponse(page("TrustGate / Live Console", body, "console", token,
+                                 extra_head=assistant_script))
 
     # ── Page: Purchase Intents (/intents) ──────────────────────────────────
+    @app.get("/intents/{intent_id}", response_class=HTMLResponse)
+    def intent_page(intent_id: str, request: Request):
+        return intent_detail(intent_id, request)
+
     @app.get("/intents", response_class=HTMLResponse)
     def intents_page(request: Request, selected: Optional[str] = None):
         token, user = human(request)
@@ -825,7 +1241,11 @@ Watch trusted facts, deterministic policy, and human authority decide what reach
             header_chip = chip(state)
             card_style = ""
             amount_color = "var(--fg)"
-            extra = f'<dl class="fact-grid"><dt style="color:var(--fg3)">State</dt><dd>{chip(state)}</dd><dt style="color:var(--fg3)">Decision</dt><dd>{chip(v["decision"])}</dd></dl>'
+            extra = (
+                f'<dl class="fact-grid"><dt style="color:var(--fg3)">State</dt><dd>{chip(state)}</dd>'
+                f'<dt style="color:var(--fg3)">Decision</dt><dd>{chip(v["decision"])}</dd></dl>'
+                f'{_flags_html(v["flags"])}'
+            )
 
         amt_display = (f['amount'] + " " + f['currency']) if f else "—"
 
@@ -931,7 +1351,7 @@ Watch trusted facts, deterministic policy, and human authority decide what reach
     <form method="post" action="/v1/approvals/{esc(intent_id)}">
       <input type="hidden" name="csrf" value="{c}">
       <input type="hidden" name="decision" value="APPROVE">
-      <button class="btn btn-primary">Approve {esc(f['amount'] + ' ' + f['currency']) if f else 'purchase'} →</button>
+      <button class="btn btn-primary">Approve purchase →</button>
     </form>
   </div>"""
 
@@ -964,7 +1384,33 @@ Watch trusted facts, deterministic policy, and human authority decide what reach
   <a href="/audit?selected={esc(intent_id)}">View audit timeline →</a>
 </p>"""
 
-        title = "Purchase awaiting approval" if held else ("Approved and captured" if captured else "Purchase")
+        if state == "BLOCKED":
+            status_badge = '<div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--bad);margin-bottom:14px">⚠ Blocked</div>'
+            title = "Blocked"
+            facts_card = f"""
+<div class="card" style="border-color:#fca5a5;background:#fff5f5">
+  {status_badge}
+  <div class="amt-big" style="margin-bottom:4px;color:var(--bad)">{esc(f['amount'] + ' ' + f['currency']) if f else '—'}</div>
+  <div class="amt-sub">{esc(f['product']) if f else '—'}</div>
+  <dl class="fact-grid" style="row-gap:8px">
+    <dt style="color:var(--fg3);font-size:12px">Merchant</dt><dd style="font-size:13px">{esc(f['merchant']) if f else '—'}</dd>
+    <dt style="color:var(--fg3);font-size:12px">Reason</dt><dd style="font-size:13px">{esc(reason_text)}</dd>
+    <dt style="color:var(--fg3);font-size:12px">State</dt><dd>{chip(state)}</dd>
+  </dl>
+  <div class="sep"></div>
+  <div class="row"><span class="ic" style="display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:50%;background:var(--bad-light);color:var(--bad);font-weight:700">&#10005;</span> <strong style="color:var(--bad);font-size:13px">Payment blocked before PayPal was called.</strong></div>
+</div>"""
+        elif held:
+            status_badge = '<div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:var(--warn);margin-bottom:14px">Held for approval</div>'
+            title = "Held for approval"
+        elif captured:
+            title = "Approved and captured"
+        else:
+            title = "Purchase"
+
+        if state != "BLOCKED":
+            title = "Purchase awaiting approval" if held else ("Approved and captured" if captured else "Purchase")
+
         body = f"""
 <div class="row mb-16">
   <a href="/intents" class="btn btn-sm">← Purchase intents</a>

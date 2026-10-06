@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: trustgate-review
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn trust_mw.demo_app:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /healthz
+    envVars:
+      - key: PAYPAL_MODE
+        value: fake
+      - key: COOKIE_SECURE
+        value: "1"
+      - key: DEMO_PASSWORD
+        value: TrustGateReview2026!

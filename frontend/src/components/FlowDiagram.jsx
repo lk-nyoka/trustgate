@@ -16,7 +16,7 @@ export default function FlowDiagram({ intent }) {
     <div className="flex items-center gap-1.5 my-3">
       <Node label="AI agent" sub="proposed" cls="border-acc" />
       <Lane cls="bg-acc" />
-      <Node label="Trust middleware" sub={mid} cls={midCls} />
+      <Node label="TrustGate" sub={mid} cls={midCls} />
       {lane
         ? <Lane cls={lane} dashed={state === 'HELD_FOR_APPROVAL'} />
         : <Lane cls="bg-gray-200" />}

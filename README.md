@@ -4,23 +4,98 @@
 
 > AI may recommend. Only policy may authorize.
 
-TrustGate is a deterministic authorization middleware that sits between an AI agent and PayPal. The agent can only *propose* purchases — the middleware resolves trusted facts, evaluates policy, optionally requests human approval, and only then calls PayPal.
+TrustGate is a deterministic authorization middleware that sits between an AI agent and PayPal. The agent can only propose purchases; the middleware resolves trusted facts, evaluates policy, optionally requests human approval, and only then allows the PayPal adapter to proceed.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 ---
 
+## Quick start (recommended self-contained setup)
+
+From the app root, not the outer project folder:
+
+```powershell
+cd "C:\Users\ASUS\Desktop\Coding Projects\Build or Die\Week 3\Hackathon\paypal\trust-middleware"
+
+.\.venv\Scripts\Activate.ps1
+python -m uvicorn trust_mw.demo_app:app --reload
+```
+
+Then open:
+
+```text
+http://127.0.0.1:8000/console
+```
+
+If activation is blocked, run without activation:
+
+```powershell
+cd "C:\Users\ASUS\Desktop\Coding Projects\Build or Die\Week 3\Hackathon\paypal\trust-middleware"
+.\.venv\Scripts\python.exe -m uvicorn trust_mw.demo_app:app --reload
+```
+
+If `.venv` does not exist yet:
+
+```powershell
+cd "C:\Users\ASUS\Desktop\Coding Projects\Build or Die\Week 3\Hackathon\paypal\trust-middleware"
+python -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+.\.venv\Scripts\python.exe -m uvicorn trust_mw.demo_app:app --reload
+```
+
+This keeps the app self-contained in `trust-middleware/.venv`, which is the easiest path for judges and clean-clone verification.
+
+### macOS/Linux
+
+```bash
+cd trust-middleware
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -r requirements.txt
+python -m pytest -q
+python -m uvicorn trust_mw.demo_app:app --reload
+```
+
+If PowerShell activation is blocked on Windows, use:
+
+```powershell
+.\.venv\Scripts\python.exe -m uvicorn trust_mw.demo_app:app --reload
+```
+
+Before opening the browser, verify the app from a separate terminal:
+
+```powershell
+cd "C:\Users\ASUS\Desktop\Coding Projects\Build or Die\Week 3\Hackathon\paypal\trust-middleware"
+.\.venv\Scripts\python.exe -m pytest -q
+```
+
+Expected result:
+
+```text
+87 passed
+```
+
+Avoid running `live_check.py` just to open the frontend; it creates real PayPal Sandbox payments and should only be used when you intentionally want to verify the live payment integration.
+
+---
+
 ## What it is
 
-A **developer control plane for agentic payments**. When an AI agent proposes a purchase:
+TrustGate is a developer control plane for agentic payments.
 
-1. The agent submits only references (merchant ID, product ID, quantity)
-2. The middleware resolves the real merchant, payee, price, and category from its registry
-3. A deterministic policy engine evaluates 8 checks and returns `ALLOW`, `APPROVAL_REQUIRED`, or `BLOCK`
-4. A DOM scanner checks the source page for hidden payment instructions
-5. If `APPROVAL_REQUIRED`, a human reviews server-derived facts in the browser and approves or declines
-6. Only after `ALLOW` or human `APPROVE` does the PayPal adapter create an order and capture payment
-7. Every decision is written to a hash-chained, tamper-detectable audit log
+The live console uses a **scripted demo agent** when no model key is configured. Set `ANTHROPIC_API_KEY` in `.env` to enable live Anthropic tool calling. Both modes expose only `search_products`, `get_product_details`, and `propose_purchase`; only product references are submitted, while trusted price and payee details are resolved server-side. The model cannot approve, capture, or call PayPal directly.
+
+To enable the live model, copy `.env.example` to `.env`, set `ANTHROPIC_API_KEY`, and restart Uvicorn. Optionally set `ANTHROPIC_MODEL`; the default is `claude-sonnet-5-5`. The startup banner reports whether the active mode is Anthropic or scripted.
+
+When an AI agent proposes a purchase:
+
+1. The agent submits only non-authoritative references, such as a merchant reference, product reference, quantity, and optional source context.
+2. The middleware resolves the trusted merchant, payee, price, currency, category, and product details from its server-side registry.
+3. A deterministic policy engine returns `ALLOW`, `APPROVAL_REQUIRED`, or `BLOCK`.
+4. A deterministic page scanner records suspicious source-context signals such as hidden payment instructions.
+5. If approval is required, an authenticated human reviews the exact server-derived transaction facts and approves or declines the request.
+6. Only a permitted request or an approved held request reaches the PayPal adapter.
+7. Every decision and payment transition is written to a hash-chained, tamper-evident audit log.
 
 **Blocked requests never create a PayPal order.** No order ID. No capture ID.
 
@@ -32,36 +107,35 @@ AI agents can propose payments. A prompt telling them to "ask first" is not an i
 
 ---
 
-## Demo
+## Demo flow
 
-### Hosted
-> Coming soon — see local run below
+The judge-facing narrative is:
 
-### Quick local run
-```powershell
-git clone https://github.com/lk-nyoka/trustgate.git
-cd trustgate
+1. A pending $320 request appears in the console.
+2. An authenticated human approves it.
+3. The governed flow captures the payment.
+4. A malicious $3 request is blocked before PayPal is called.
+5. The audit trail shows the exact decision path.
 
-# Python backend (fake PayPal, no credentials needed)
-pip install -r requirements.txt
-python -m uvicorn trust_mw.demo_app:app --port 8000
+---
 
-# React frontend (separate terminal)
-cd frontend
-npm install
-npm run dev
-```
+## AI integration
 
-Open **http://localhost:5173** — log in with `demo` / (password printed in backend console).
+When configured, the Anthropic assistant interprets the user's request and may call three tools: `search_products`, `get_product_details`, and `propose_purchase`. Without an API key, a scripted assistant demonstrates the same governed proposal path. In either mode, the scanner and deterministic policy run server-side, and authenticated human approval controls held payments.
 
-### With PayPal Sandbox
-```powershell
-cp .env.example .env
-# Fill in PAYPAL_CLIENT_ID and PAYPAL_CLIENT_SECRET
-# Copy .vault_token.json from a spike2_vault.py run
-$env:PAYPAL_MODE="sandbox"
-python -m uvicorn trust_mw.demo_app:app --port 8000
-```
+---
+
+## Security model
+
+| Property | Mechanism |
+|---|---|
+| Agent cannot supply authoritative price/payee | Request schema accepts references only; trusted facts come from the server-side registry |
+| Unexpected agent fields are rejected | Request model uses `extra="forbid"` |
+| Agent cannot approve its own purchase | Agent bearer tokens are rejected at `/v1/approvals/` with HTTP 403 |
+| Approval is bound to exact facts | Approval-time checks compare merchant, product, payee, amount, currency, policy version, and expiry |
+| Blocked requests never reach PayPal | The PayPal adapter runs only after `ALLOW` or authenticated approval of a held intent |
+| Decisions are tamper-evident | SHA-256 hash-chained audit log with `chain_valid` verification |
+| Policy revocation is immediate | The kill switch pauses authorization and held requests fail approval checks |
 
 ---
 
@@ -69,7 +143,7 @@ python -m uvicorn trust_mw.demo_app:app --port 8000
 
 ```
 AI Agent
-   │  propose_purchase(merchant_ref, product_ref, quantity, source_url)
+   │  propose_purchase(merchant_reference, product_reference, quantity, source_context)
    ▼
 Purchase Intent API          ← agent API key, rejects extra fields
    ▼
@@ -90,28 +164,15 @@ Audit Log                    ← SHA-256 hash-chained, append-only
 
 ---
 
-## Security model
-
-| Property | Mechanism |
-|---|---|
-| Agent cannot supply price/payee | `extra="forbid"` on the request model; registry resolves all facts |
-| Agent cannot approve its own purchase | Bearer tokens rejected at `/v1/approvals/` with HTTP 403 |
-| Approval bound to exact facts | 7-item binding check at approval time; any change → block |
-| Blocked requests never reach PayPal | PayPal adapter only called after ALLOW or human APPROVE |
-| Tamper-evident decisions | SHA-256 hash-chained audit log; `chain_valid` on every audit read |
-| Policy revocation | Instant kill switch; any held requests refuse approval after revocation |
-
----
-
 ## API reference
 
 | Method | Path | Auth | Description |
 |---|---|---|---|
 | `POST` | `/v1/purchase-intents` | Bearer API key | Agent proposes a purchase |
 | `POST` | `/v1/approvals/{intent_id}` | Session + CSRF | Human approves or declines |
-| `GET` | `/v1/intents/{intent_id}` | Bearer or session | Poll intent state |
+| `GET` | `/v1/intents/{intent_id}` | Delegated-user session or authorized admin key | Poll intent state |
 | `GET` | `/v1/intents/{intent_id}/audit` | Session or admin key | Hash-chained audit trail |
-| `POST` | `/api/login` | — | JSON login (React frontend) |
+| `POST` | `/api/login` | — | JSON login |
 | `GET` | `/api/me` | Session | Current user + stats + policy |
 | `GET` | `/api/intents` | Session | All intents for this user |
 
@@ -119,31 +180,28 @@ Audit Log                    ← SHA-256 hash-chained, append-only
 
 ## PayPal integration
 
-- **Orders v2** — create + capture via saved payment token (vault flow)
-- **Vault token** — established once via `spike2_vault.py`, held server-side, never exposed to the agent
-- **Idempotency** — same `PayPal-Request-Id` on retries; PayPal deduplicates
-- **Read-back verification** — after capture, the adapter GETs the order and verifies amount, currency, and payee independently
-- **Sandbox** — all payments go to a fictional sandbox merchant; no real money
+- **Environment:** PayPal Sandbox only; all merchants and payment scenarios are fictional.
+- **Payment flow:** PayPal Orders v2 create-and-capture flow using the validated saved-payment-token path.
+- **Credential boundary:** PayPal credentials and the vault token remain server-side and are never exposed to the agent or browser.
+- **Read-back verification:** After capture, the adapter re-reads the PayPal order and verifies completion status, capture status, amount, currency, and internal intent reference.
+- **Blocked requests:** Blocked requests do not create a PayPal order.
+- **Human approval:** PayPal execution occurs only after the middleware confirms the held intent is still valid and the authenticated user has approved it.
 
 ---
 
-## AI integration
+## Live checks
 
-- **Agent** — submits purchase intents via a scoped API key; receives only policy decisions and intent state
-- **Context scanner** — deterministic DOM scanner detects hidden payment instructions injected into pages the agent browsed
-- **Policy engine** — deterministic Python function; not an LLM decision
+```bash
+python live_check.py
+```
 
-The final authorization decision is deliberately independent of the AI. The agent cannot override it.
+> This command creates PayPal Sandbox payments and should only be run when Sandbox credentials and buyer-consent setup are available.
 
----
+The normal verification command remains:
 
-## Demo credentials
-
-| | Value |
-|---|---|
-| Demo login | `demo` / *(printed in backend console at startup)* |
-| API key | *(printed in backend console at startup)* |
-| PayPal mode | `fake` (offline) or `sandbox` (needs `.env`) |
+```bash
+python -m pytest -q
+```
 
 ---
 
@@ -151,7 +209,7 @@ The final authorization decision is deliberately independent of the AI. The agen
 
 | Scenario | Merchant | Amount | Decision | Outcome |
 |---|---|---|---|---|
-| Safe flight | Demo Airlines | $180 | ALLOW | Auto-captured, no human needed |
+| Safe flight | Demo Airlines | $180 | ALLOW | Auto-captured |
 | Flexible flight | Demo Airlines | $320 | APPROVAL_REQUIRED | Held; human approves → captured |
 | Injected fee | Activation Services Demo | $3 | BLOCK | PayPal never called |
 
@@ -159,33 +217,83 @@ The final authorization decision is deliberately independent of the AI. The agen
 
 ## Verified results
 
-- **56 tests passed** (pytest)
-- **2 PayPal Sandbox payments** captured and independently verified via read-back
-- **1 injected fee blocked** before PayPal order creation
-- **Audit chain verified** — SHA-256 hash chain intact
+### Application and frontend verification
+
+- **87 tests passed** with `python -m pytest -q`
+- React production build succeeds with `npm run build` from `frontend/`
+- Desktop and mobile layouts checked; reduced-motion behavior is supported
+- Sign-in journey covers empty, invalid, valid, refresh, logout, back-cache protection, and eight-hour expiry
+- `git diff --check` passes
+- Approval mutation checks cover trusted price, payee, and policy-version changes
+- Agent approval attempts are rejected
+- Blocked and held intents do not invoke the PayPal adapter
+- Audit-chain verification passes
+
+### PayPal Sandbox verification
+
+- **2 governed Sandbox payments completed in the prior live verification**
+- Captured amounts independently verified as `$180.00 USD` and `$320.00 USD`
+- Both PayPal orders and captures returned `COMPLETED`
+- **1 held request created no PayPal order**
+- **1 blocked injected-fee request created no PayPal order**
+- Audit chain verified
+
+> Sandbox payment results are historical integration evidence, separate from the current automated tests and local frontend build. The public Render demo uses `PAYPAL_MODE=fake`; it never submits payments to PayPal.
+
+---
+
+## Public review deployment
+
+The repository is public at <https://github.com/lk-nyoka/trustgate>. GitHub Pages cannot run this FastAPI backend; use the included Render Blueprint to host the complete application:
+
+1. Open <https://render.com/deploy?repo=https://github.com/lk-nyoka/trustgate> and sign in to Render.
+2. Review the `trustgate-review` web service and deploy it.
+3. Open the generated `*.onrender.com/console` URL.
+
+Review login: username `demo`, password `TrustGateReview2026!`. This is a shared public demo account, the app runs the fake payment adapter, and in-memory state may reset when the free service sleeps or restarts. Do not put real credentials or payment data into this review instance.
+
+---
+
+## Demo access
+
+After starting the app, open:
+
+```text
+http://127.0.0.1:8000/console
+```
+
+Use the seeded demo user shown in the application startup output or in the judge setup instructions.
+
+The application is intentionally limited to fictional merchants and PayPal Sandbox data. Do not use real credentials or production payment details.
 
 ---
 
 ## Setup for judges
 
+### Windows
+
 ```powershell
-git clone https://github.com/lk-nyoka/trustgate.git
-cd trustgate
-pip install -r requirements.txt
-
-# Offline demo (no PayPal credentials needed)
-python -m uvicorn trust_mw.demo_app:app --port 8000
-# Login: demo / <see console output>
-
-# Run tests
+cd trust-middleware
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install -r requirements.txt
 python -m pytest -q
 ```
 
-For the React UI:
-```powershell
-cd frontend
-npm install
-npm run dev   # http://localhost:5173
+### macOS/Linux
+
+```bash
+cd trust-middleware
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -r requirements.txt
+python -m pytest -q
+```
+
+To launch the app after setup:
+
+```bash
+python -m uvicorn trust_mw.demo_app:app --reload
 ```
 
 ---
@@ -194,10 +302,9 @@ npm run dev   # http://localhost:5173
 
 - In-memory state — restart clears all intents
 - Single process, single demo user
-- Scanner is heuristic on 7 test pages; not a trained detector
+- Scanner is heuristic and not a general-purpose detector
 - Cumulative budget counts captured purchases only
 - Webhooks not implemented
-- LLM policy compiler and LLM context evaluator require an API key (not tested here)
 
 ---
 

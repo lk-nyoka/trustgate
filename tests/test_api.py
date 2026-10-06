@@ -14,7 +14,7 @@ PAGES["https://demo-airlines.test/xss"] = (
 def make(env=None):
     env = env or Env()
     app = create_app(env.svc, {"alice": ("user_1", "pw1"), "bob": ("user_2", "pw2")},
-                     csrf_secret="test-secret", admin_key="admin-1")
+                     csrf_secret="test-secret", admin_key="admin-1", demo_agent_key="agent_key_1")
     return env, TestClient(app, follow_redirects=False)
 
 
@@ -81,10 +81,26 @@ def test_approval_without_login_is_401():
 
 def test_bad_login_is_rejected_and_good_login_sets_httponly_strict_cookie():
     _, c = make()
+    empty = c.post("/login", data={})
+    assert empty.status_code == 401 and "login-error" in empty.text
     assert login(c, pw="wrong").status_code == 401
     ok = login(c)
     cookie = ok.headers["set-cookie"].lower()
-    assert ok.status_code == 303 and "httponly" in cookie and "samesite=strict" in cookie
+    assert ok.status_code == 303 and ok.headers["location"] == "/console"
+    assert "httponly" in cookie and "samesite=strict" in cookie and "max-age=28800" in cookie
+
+
+def test_login_page_shows_trustgate_flow_and_reduced_motion_support():
+    _, c = make()
+    page = c.get("/login").text
+    for text in ("TrustGate", "AI may recommend.", "Only policy may authorize.",
+                 "AI agent", "TrustGate", "PayPal", "@keyframes flow-pass",
+                 "prefers-reduced-motion:reduce", "max-width:680px"):
+        assert text in page
+    wrong = login(c, pw="wrong")
+    assert wrong.status_code == 401
+    assert "login-error" in wrong.text and "Wrong username or password." in wrong.text
+    assert "login-stage" in wrong.text
 
 
 def test_human_approval_via_page_executes_exactly_once():
@@ -140,6 +156,48 @@ def test_pages_require_login():
         assert c.get(path).status_code == 303
 
 
+def test_sign_in_refresh_logout_and_private_cache_headers():
+    _, c = make()
+    assert c.get("/console").status_code == 303
+    assert c.get("/console").headers["location"] == "/login"
+
+    assert login(c).status_code == 303
+    first = c.get("/console")
+    refreshed = c.get("/console")
+    assert first.status_code == refreshed.status_code == 200
+    assert "no-store" in first.headers["cache-control"]
+    assert "Live agent activity" in refreshed.text and "Active spending policy" in refreshed.text
+    assert "ALLOW" in refreshed.text and "APPROVAL_REQUIRED" in refreshed.text and "BLOCK" in refreshed.text
+
+    csrf = re.search(r'name="csrf" value="([^"]+)"', refreshed.text).group(1)
+    assert c.post("/logout", data={"csrf": "wrong"}).status_code == 303
+    assert c.get("/api/me").status_code == 200
+    assert c.post("/logout", data={"csrf": csrf}).status_code == 303
+    assert c.get("/api/me").status_code == 401
+    assert c.get("/console").status_code == 303
+
+
+def test_api_logout_requires_csrf_and_revokes_session():
+    _, c = make()
+    login(c)
+    csrf = c.get("/api/me").json()["csrf"]
+    assert c.post("/api/logout", json={"csrf": "forged"}).status_code == 403
+    assert c.get("/api/me").status_code == 200
+    response = c.post("/api/logout", json={"csrf": csrf})
+    assert response.status_code == 200
+    assert c.get("/api/me").status_code == 401
+    assert c.get("/console").status_code == 303
+
+
+def test_human_session_expires_after_eight_hours():
+    env, c = make()
+    assert login(c).status_code == 303
+    assert c.get("/api/me").status_code == 200
+    env.clock.advance(8 * 60)
+    assert c.get("/api/me").status_code == 401
+    assert c.get("/console").status_code == 303
+
+
 def test_untrusted_page_text_is_escaped_in_the_audit_and_approval_pages():
     _, c = make()
     iid = propose(c, "cpt-jnb-economy-180", url="https://demo-airlines.test/xss").json()["intent_id"]
@@ -165,3 +223,70 @@ def test_audit_json_for_owner_and_admin_key():
     admin = c.get(f"/v1/intents/{iid}/audit", headers={"x-admin-key": "admin-1"}).json()
     assert admin["chain_valid"] is True and admin["events"][0]["event"] == "INTENT_RECEIVED"
     assert c.get(f"/v1/intents/{iid}/audit", headers={"x-admin-key": "wrong"}).status_code == 401
+
+
+def test_console_assistant_uses_registry_and_governed_proposals():
+    env, c = make()
+    assert c.get("/api/assistant/products?q=flight").status_code == 401
+    login(c)
+    csrf = c.get("/api/me").json()["csrf"]
+
+    products = c.get("/api/assistant/products?q=direct+flight+under+%24500").json()["products"]
+    assert [item["product_reference"] for item in products] == [
+        "cpt-jnb-economy-180", "cpt-jnb-flex-320"]
+    details = c.get("/api/assistant/products/cpt-jnb-flex-320").json()
+    assert details["display_amount"] == "320.00" and details["merchant_reference"] == "merchant_demo_airlines"
+
+    held = c.post("/api/assistant/propose", json={
+        "product_reference": "cpt-jnb-flex-320", "csrf": csrf,
+    }).json()
+    assert held["decision"] == "APPROVAL_REQUIRED"
+    assert held["state"] == "HELD_FOR_APPROVAL"
+    assert held["approval_url"] == f"/approvals/{held['intent_id']}"
+    assert env.payments.calls == []
+
+    blocked = c.post("/api/assistant/propose", json={
+        "product_reference": "activation-fee-3", "csrf": csrf,
+    }).json()
+    assert blocked["decision"] == "BLOCK"
+    assert "MERCHANT_NOT_IN_POLICY" in blocked["reason_codes"]
+    assert "CONTEXT_HIDDEN_PAYMENT_INSTRUCTION" in blocked["reason_codes"]
+    assert env.payments.calls == []
+
+    captured = c.post("/api/assistant/propose", json={
+        "product_reference": "cpt-jnb-economy-180", "csrf": csrf,
+    }).json()
+    assert captured["decision"] == "ALLOW" and captured["state"] == "CAPTURED"
+    payment = c.get(f"/api/intents/{captured['intent_id']}").json()
+    assert payment["order_id"] and payment["capture_id"]
+    assert len(env.payments.calls) == 1
+
+
+def test_console_renders_assistant_and_honestly_labels_demo_agent():
+    _, c = make()
+    login(c)
+    page = c.get("/console").text
+    for text in ("TrustGate / Live console", "AI purchase assistant", "Scripted demo agent",
+                 "search_products", "get_product_details", "propose_purchase",
+                 "Active spending policy", "Unsafe proposals blocked"):
+        assert text in page
+    assert "not a live language model" in page
+    csrf = c.get("/api/me").json()["csrf"]
+    assert c.get("/api/me").json()["assistant_mode"] == "scripted"
+    response = c.post("/api/assistant/chat", json={"message": "Find a flight", "csrf": csrf})
+    assert response.status_code == 503
+
+
+def test_console_assistant_cannot_accept_browser_supplied_payment_facts_or_cross_users():
+    _, c = make()
+    login(c, "bob", "pw2")
+    csrf = c.get("/api/me").json()["csrf"]
+    response = c.post("/api/assistant/propose", json={
+        "product_reference": "cpt-jnb-flex-320", "csrf": csrf, "amount": "1.00",
+    })
+    assert response.status_code == 422
+
+    response = c.post("/api/assistant/propose", json={
+        "product_reference": "cpt-jnb-flex-320", "csrf": csrf,
+    })
+    assert response.status_code == 403

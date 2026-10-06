@@ -69,6 +69,9 @@ a{color:var(--acc);text-decoration:none}a:hover{text-decoration:underline}
   justify-content:center;font-size:12px;font-weight:700;color:#fff;flex-shrink:0}
 .user-name{font-size:12px;font-weight:600;color:var(--sidebar-fg)}
 .user-role{font-size:10px;color:var(--sidebar-mut)}
+.logout-button{margin:2px 0 0 48px;padding:2px 0;border:0;background:none;color:var(--sidebar-mut);
+  font:inherit;font-size:10px;cursor:pointer}
+.logout-button:hover{color:var(--sidebar-fg)}
 
 /* ── Page headers ────────────────────────────────────────────────────────── */
 .page-eyebrow{font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.12em;
@@ -225,13 +228,13 @@ def flow_html(v):
     elif v.get("state") == "HELD_FOR_APPROVAL":
         mid, mcls, lane, end, ecls = "Held for approval", "warn", "warn", "Not reached yet", "dim"
     elif v.get("decision") == "BLOCK":
-        mid, mcls, lane, end, ecls = "Blocked", "bad", "off", "Never called", "dim"
+        mid, mcls, lane, end, ecls = "Blocked", "bad", "off", "Not reached", "dim"
     else:
         mid, mcls, lane, end, ecls = (v.get("state","—").replace("_"," ").title()), "bad", "off", "Not reached", "dim"
     return (f'<div class="flow">'
             f'<div class="flow-node">AI agent<small>proposed</small></div>'
             f'<div class="flow-lane ok"></div>'
-            f'<div class="flow-node {mcls}">Trust middleware<small>{esc(mid)}</small></div>'
+            f'<div class="flow-node {mcls}">TrustGate<small>{esc(mid)}</small></div>'
             f'<div class="flow-lane {lane}"></div>'
             f'<div class="flow-node {ecls}">PayPal<small>{esc(end)}</small></div>'
             f'</div>')
@@ -240,11 +243,19 @@ def flow_html(v):
 def checks_html(title, items):
     if not items:
         return ""
-    ICON = {"pass": "✓", "fail": "✕", "review": "!"}
+    ICON = {"pass": "✓", "fail": "&#10005;", "review": "!"}
+
+    def render_icon(state):
+        icon = ICON.get(state, "?")
+        if state == "fail":
+            return f'<span class="ic">{icon}</span>'
+        return icon
+
     lis = "".join(
         f'<li class="chk-{esc(s)}" style="--i:{i}">'
-        f'<span class="chk-ic">{ICON.get(s,"?")}</span>{esc(n)}</li>'
-        for i, (n, s) in enumerate(items))
+        f'<span class="chk-ic">{render_icon(s)}</span>{esc(n)}</li>'
+        for i, (n, s) in enumerate(items)
+    )
     return f'<div class="mb-8" style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--fg3);margin-top:16px">{esc(title)}</div><ul class="chk-list">{lis}</ul>'
 
 
@@ -320,13 +331,13 @@ def layout(title, body, active_nav="", paypal_mode="fake", stats=None, extra_hea
   <div class="sb-brand">
     <div class="logo">
       <div class="logo-icon">T</div>
-      <div class="logo-name">TrustMiddleware</div>
+      <div class="logo-name">TrustGate</div>
     </div>
     <div class="logo-sub">Autonomous commerce</div>
   </div>
   <div class="sb-section">Control plane</div>
   <ul class="sb-nav">
-    {nav_item("▦", "Command center", "/console", "console",
+    {nav_item("▦", "Live console", "/console", "console",
               badge=total if total else None)}
     {nav_item("→", "Purchase intents", "/intents", "intents",
               badge=total if total else None)}
@@ -347,12 +358,13 @@ def layout(title, body, active_nav="", paypal_mode="fake", stats=None, extra_hea
         <div class="user-role">Policy owner</div>
       </div>
     </div>
+    <button class="logout-button" type="submit" form="logout-form">Sign out</button>
   </div>
 </aside>"""
 
     return f"""<!doctype html><html lang="en"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>{esc(title)} · TrustMiddleware</title>
+<title>{esc(title)} · TrustGate</title>
 <style>{CSS}</style>{extra_head}
 </head><body>
 <div class="shell">
@@ -360,7 +372,7 @@ def layout(title, body, active_nav="", paypal_mode="fake", stats=None, extra_hea
   <div class="main">
     <div class="topbar">
       <div class="breadcrumb">
-        <span>Workspace</span>
+        <span>TrustGate</span>
         <span>/</span>
         <span style="color:var(--fg)">{esc(title.upper())}</span>
       </div>

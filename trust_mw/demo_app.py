@@ -49,6 +49,20 @@ def build():
         DictPages(),
     )
 
+    assistant_runner = None
+    if os.getenv("ANTHROPIC_API_KEY"):
+        try:
+            from anthropic import Anthropic
+            from .assistant import AssistantRunner
+            assistant_runner = AssistantRunner(
+                Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"]),
+                svc,
+                agent_key,
+                os.getenv("ANTHROPIC_MODEL", "claude-sonnet-5-5"),
+            )
+        except ImportError:
+            print("[assistant] Install requirements to enable the Anthropic assistant.")
+
     # ── Seed the three demo scenarios ─────────────────────────────────────
     _seed_demo_intents(svc, agent_key)
 
@@ -59,11 +73,14 @@ def build():
         admin_key=admin_key,
         cookie_secure=os.getenv("COOKIE_SECURE") == "1",
         paypal_mode=mode,
+        demo_agent_key=agent_key,
+        assistant_runner=assistant_runner,
     )
 
     print(f"\n{'='*56}")
-    print(f"  TrustMiddleware demo server")
+    print(f"  TrustGate demo server")
     print(f"  Payments : {mode}")
+    print(f"  Assistant: {'Anthropic' if assistant_runner else 'scripted demo'}")
     print(f"  Login    : demo / {password}")
     print(f"  API key  : {agent_key}")
     if admin_key:

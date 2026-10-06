@@ -106,8 +106,8 @@ export default function ConsolePage() {
           <span className="text-acc">It cannot authorize.</span>
         </h1>
         <p className="text-[14px] text-gray-500 max-w-xl">
-          TrustGate turns an AI recommendation into a governed purchase intent.
-          Trusted facts, deterministic policy, and human authority decide what reaches PayPal.
+          TrustGate turns an AI recommendation into a verified purchase intent, and stops it before PayPal when policy does not authorize it.
+          Developers give agents one governed purchase tool instead of raw PayPal payment tools.
         </p>
       </div>
 
@@ -120,7 +120,7 @@ export default function ConsolePage() {
       <div className="grid grid-cols-4 gap-3 mb-6">
         <StatCard label="Requests today" value={String(total).padStart(2,'0')} sub="all decisions visible" />
         <StatCard label="Payments captured" value={String(stats.captured||0).padStart(2,'0')} sub="via governed flow" color="text-ok" />
-        <StatCard label="PayPal bypass attempts" value={String(stats.blocked||0).padStart(2,'0')} sub="blocked before order" color="text-bad" />
+        <StatCard label="Unsafe proposals blocked" value={String(stats.blocked||0).padStart(2,'0')} sub="blocked before order" color="text-bad" />
         <StatCard
           label="Active policy"
           value={policy ? `travel.v${policy.version}` : '—'}
@@ -132,7 +132,7 @@ export default function ConsolePage() {
       <div className="grid grid-cols-2 gap-4">
         {/* Story cards */}
         <div>
-          <div className="text-[11px] font-semibold uppercase tracking-widest text-gray-400 mb-3">01 / Run the story</div>
+          <div className="text-[11px] font-semibold uppercase tracking-widest text-gray-400 mb-3">Live agent activity</div>
           {STORY.map((s, i) => {
             const intent = storyIntents[s.key]
             const href = intent
@@ -165,7 +165,7 @@ export default function ConsolePage() {
 
         {/* Policy panel */}
         <div>
-          <div className="text-[11px] font-semibold uppercase tracking-widest text-gray-400 mb-3">02 / Authority</div>
+          <div className="text-[11px] font-semibold uppercase tracking-widest text-gray-400 mb-3">Active spending policy</div>
           {policy && (
             <div className="bg-white border border-gray-200 rounded-xl p-5">
               <div className="flex items-center justify-between mb-3">

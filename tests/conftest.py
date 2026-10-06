@@ -25,7 +25,7 @@ class Env:
     def __init__(self, policy=None, payments=None):
         self.clock = Clock()
         self.payments = payments or FakePayPal()
-        self.auth = AuthStore()
+        self.auth = AuthStore(clock=self.clock)
         self.policy = policy or make_policy()
         self.auth.register_agent("agent_key_1", "user_1", self.policy.policy_id)
         self.user1 = self.auth.issue_session("user_1")

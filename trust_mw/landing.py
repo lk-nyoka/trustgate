@@ -6,7 +6,7 @@ red = contained before PayPal is called. Respects prefers-reduced-motion.
 """
 
 PAGE = """<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Trust Middleware</title><style>
+<title>TrustGate</title><style>
 :root{--bg:#0b0d12;--fg:#e8e6e1;--mut:#8b93a7;--line:#222838;--card:rgba(18,21,28,.72);--acc:#818cf8;--ok:#34d399;--warn:#fbbf24;--bad:#f87171}
 *{box-sizing:border-box}html{scroll-behavior:smooth}body{margin:0;background:radial-gradient(1200px 600px at 70% -10%,#1b2146 0,var(--bg) 60%) fixed;color:var(--fg);font:16px/1.55 system-ui,-apple-system,"Segoe UI",sans-serif}
 #bg{position:fixed;inset:0;width:100%;height:100%;z-index:0;pointer-events:none}
@@ -33,17 +33,17 @@ footer{color:var(--mut);font-size:14px;padding:30px 0 50px}
 @media(max-width:820px){.hero{grid-template-columns:1fr}.cards,.stats{grid-template-columns:1fr}}
 @media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}*{transition:none!important}}
 </style></head><body><canvas id="bg"></canvas><div class="wrap">
-<header class="nav"><b>Trust Middleware</b><nav><a href="#how">How it works</a><a href="#proof">Proof</a><a class="btn" href="/login">Launch demo</a></nav></header>
+<header class="nav"><b>TrustGate</b><nav><a href="#how">How it works</a><a href="#proof">Proof</a><a class="btn" href="/login">Launch demo</a></nav></header>
 <section class="hero"><div><p class="eyebrow">Trust infrastructure for autonomous commerce</p>
 <h1>AI may recommend.<br><span>Only policy may authorize.</span></h1>
-<p class="lead">Middleware between your AI agent and PayPal. Deterministic policy decides whether a payment is ever attempted, a human approves the exceptions, and every decision leaves evidence.</p>
+<p class="lead">TrustGate is trust middleware between your AI agent and PayPal. Deterministic policy decides whether a payment is ever attempted, a human approves the exceptions, and every decision leaves evidence.</p>
 <div class="cta"><a class="btn primary" href="/login">Launch live demo</a><a class="btn" href="#how">See how it works</a></div></div>
 <div class="panel" id="panel"><canvas id="flow" width="640" height="340"></canvas><div class="cap"><span id="cl"></span><b id="co"></b></div></div></section>
 <section id="proof"><h2>Live from this server</h2><div class="stats">
 <div><b>{{captured}}</b><span>payments captured</span></div><div><b>{{awaiting}}</b><span>awaiting a human</span></div><div><b>{{blocked}}</b><span>blocked before PayPal</span></div></div>
 <ul class="claims"><li>Held and blocked requests never create a PayPal order.</li><li>The agent holds no payment credentials and cannot approve itself.</li>
 <li>Approvals are bound to the merchant, payee, amount, currency and policy version.</li><li>Every decision is written to a hash-chained audit log.</li></ul></section>
-<section id="how"><h2>Why Trust Middleware?</h2><div class="cards">
+<section id="how"><h2>How TrustGate works</h2><div class="cards">
 <div class="card tilt k1"><h3>AI agent</h3><ul><li>Finds products</li><li>Plans purchases</li><li>Submits purchase intents</li><li>Cannot spend money</li></ul></div>
 <div class="card tilt k2"><h3>Trust middleware</h3><ul><li>Resolves trusted facts</li><li>Evaluates deterministic policy</li><li>Requests approval when needed</li><li>Records audit evidence</li></ul></div>
 <div class="card tilt k3"><h3>Payment provider</h3><ul><li>Receives only authorized requests</li><li>Executes the payment</li><li>Returns order and capture status</li></ul></div></div></section>
@@ -75,7 +75,7 @@ function flow(t){const i=Math.floor(t/D)%3,s=S[i],u=reduce?3.4:t%D;f.clearRect(0
  lane(0,1,C.acc,.8);
  lane(1,2,decided&&s.m==="allow"?C.ok:decided&&s.m==="hold"?C.warn:C.line,decided&&s.m!=="block"?.9:.5,decided&&s.m==="hold");
  node(0,"AI agent",C.acc,false);
- node(1,"Trust middleware",!decided?C.acc:s.c,u>1.6&&u<2.6||decided&&s.m!=="allow"&&pulse>.5);
+ node(1,"TrustGate",!decided?C.acc:s.c,u>1.6&&u<2.6||decided&&s.m!=="allow"&&pulse>.5);
  node(2,"PayPal",decided&&s.m==="allow"&&u>3.9?C.ok:C.line,decided&&s.m==="allow"&&u>3.9);
  f.fillStyle=C.mut||"#8b93a7";f.font="12px system-ui";f.fillText("proposes",FW*X[0],FH*Y+54);f.fillText(decided?s.m==="allow"?"authorized":s.m==="hold"?"held":"contained":"evaluating",mc,FH*Y+54);
  f.fillText(decided&&s.m==="allow"&&u>3.9?"order captured":s.m==="block"&&decided?"not reached":"",FW*X[2],FH*Y+54);

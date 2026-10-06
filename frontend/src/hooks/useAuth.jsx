@@ -4,7 +4,7 @@ import { api, setCSRF } from '../api'
 const AuthCtx = createContext(null)
 
 export function AuthProvider({ children }) {
-  const [user, setUser] = useState(undefined) // undefined = loading, null = unauthed
+  const [user, setUser] = useState(undefined)
   const [stats, setStats] = useState({})
   const [policy, setPolicy] = useState(null)
   const [paypalMode, setPaypalMode] = useState('fake')

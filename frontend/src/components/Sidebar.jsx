@@ -2,7 +2,7 @@ import { NavLink } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
 
 const NAV = [
-  { to: '/console',      icon: '▦', label: 'Command center' },
+  { to: '/console',      icon: '▦', label: 'Live console' },
   { to: '/intents',      icon: '→', label: 'Purchase intents' },
   { to: '/audit',        icon: '≡', label: 'Audit trail' },
   { to: '/architecture', icon: '◈', label: 'Architecture' },
@@ -52,7 +52,7 @@ export default function Sidebar() {
                   {total}
                 </span>
               )}
-              {label === 'Command center' && pending > 0 && (
+              {label === 'Live console' && pending > 0 && (
                 <span className="ml-auto bg-[#78350f] text-amber-200 text-[10px] font-bold px-1.5 py-0.5 rounded-full min-w-[20px] text-center">
                   {pending}
                 </span>
