@@ -36,6 +36,6 @@ def make_policy(**over):
                 merchant_allowlist=frozenset({"merchant_demo_airlines"}),
                 category_allowlist=frozenset({"travel"}), currency_allowlist=frozenset({"USD"}),
                 max_single_purchase=Decimal("500"), max_total_spend=Decimal("1000"),
-                auto_approve_up_to=Decimal("250"), approval_expiry_minutes=60)
+                auto_approve_up_to=Decimal("250"), approval_expiry_minutes=10)
     base.update(over)
     return Policy(**base)

@@ -59,7 +59,7 @@ def test_approval_binding_checks_are_shown_only_after_a_real_approval():
     assert "Approval bound to these verified facts" not in c.get(f"/approvals/{iid}").text
     approve(c, iid)
     page = c.get(f"/approvals/{iid}").text
-    for name in ("Merchant verified", "Product verified", "Payee verified", "Amount verified",
+    for name in ("Merchant verified", "Product verified", "Configured payee binding verified", "Amount verified",
                  "Currency verified", "Policy version verified", "Approval window valid"):
         assert name in page
     assert "Order captured" in page

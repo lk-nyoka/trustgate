@@ -21,7 +21,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field, StrictInt
 
 from .landing import landing_page
-from .service import ApprovalError, AuthError
+from .service import ApprovalError, AuthError, IdempotencyConflict
 from .ui_shell import (CSS, EVENT_LABELS, BLOCK_LABELS, chip, checks_html,
                        flow_html, fmt_expiry, layout, reason_label, esc)
 
@@ -639,6 +639,8 @@ def create_app(svc, users, csrf_secret, admin_key=None, cookie_secure=False,
                                         body.quantity, body.source_url, body.request_id)
         except AuthError:
             return err("invalid agent key", 401)
+        except IdempotencyConflict as exc:
+            return err(str(exc), 409)
 
     @app.get("/v1/intents/{intent_id}")
     def get_intent_api(intent_id: str, request: Request):

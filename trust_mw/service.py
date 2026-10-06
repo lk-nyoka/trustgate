@@ -6,6 +6,7 @@ supplies prices, payees, categories, user ids or approvals.
 """
 import hashlib
 import json
+import threading
 import uuid
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
@@ -22,6 +23,10 @@ class AuthError(Exception):
 
 class ApprovalError(Exception):
     pass
+
+
+class IdempotencyConflict(Exception):
+    """The same request_id was reused with a different canonical payload."""
 
 
 @dataclass(frozen=True)
@@ -107,10 +112,15 @@ class TrustService:
         self.clock = clock or (lambda: datetime.now(timezone.utc))
         self.audit = AuditLog(self.clock)
         self._intents = {}
-        self._by_request = {}
+        self._by_request = {}  # idempotency key -> (intent_id, canonical request hash)
+        self._lock = threading.RLock()  # serialises propose/approve/decline/policy changes
 
     # ---- human-only policy lifecycle -------------------------------------
     def confirm_policy(self, session_token, policy_id):
+        with self._lock:
+            return self._confirm_policy(session_token, policy_id)
+
+    def _confirm_policy(self, session_token, policy_id):
         user = self.auth.session_user(session_token)
         policy = self.policies[policy_id]
         if policy.user_id != user:
@@ -119,6 +129,10 @@ class TrustService:
         self.audit.append(None, "POLICY_CONFIRMED", {"policy_id": policy_id, "by": user})
 
     def revoke_policy(self, session_token, policy_id):
+        with self._lock:
+            return self._revoke_policy(session_token, policy_id)
+
+    def _revoke_policy(self, session_token, policy_id):
         user = self.auth.session_user(session_token)
         policy = self.policies[policy_id]
         if policy.user_id != user:
@@ -127,12 +141,32 @@ class TrustService:
         self.audit.append(None, "POLICY_REVOKED", {"policy_id": policy_id, "by": user})
 
     # ---- agent surface ---------------------------------------------------
+    @staticmethod
+    def request_hash(merchant_reference, product_reference, quantity, source_url):
+        """Canonical hash of the operation an idempotency key is bound to."""
+        canonical = {"merchant_reference": merchant_reference,
+                     "product_reference": product_reference,
+                     "quantity": quantity,
+                     "source_context_hash": hashlib.sha256((source_url or "").encode()).hexdigest()}
+        return hashlib.sha256(json.dumps(canonical, sort_keys=True, separators=(",", ":"),
+                                         default=str).encode()).hexdigest()
+
     def propose_purchase(self, agent_key, merchant_reference, product_reference, quantity,
                          source_url, request_id):
+        with self._lock:
+            return self._propose_purchase(agent_key, merchant_reference, product_reference,
+                                          quantity, source_url, request_id)
+
+    def _propose_purchase(self, agent_key, merchant_reference, product_reference, quantity,
+                          source_url, request_id):
         user_id, policy_id = self.auth.agent(agent_key)
         idem = f"{agent_key}:{request_id}"
+        req_hash = self.request_hash(merchant_reference, product_reference, quantity, source_url)
         if idem in self._by_request:
-            return self._agent_view(self._intents[self._by_request[idem]])
+            existing_id, existing_hash = self._by_request[idem]
+            if existing_hash != req_hash:
+                raise IdempotencyConflict("IDEMPOTENCY_KEY_REUSED_WITH_DIFFERENT_PAYLOAD")
+            return self._agent_view(self._intents[existing_id])
 
         intent_id = "pi_" + uuid.uuid4().hex[:12]
         policy = self.policies[policy_id]
@@ -141,7 +175,7 @@ class TrustService:
                "reasons": [], "facts": None, "flags": [], "approver": None, "payment": None,
                "expires_at": None, "checks": [], "binding_checks": []}
         self._intents[intent_id] = rec
-        self._by_request[idem] = intent_id
+        self._by_request[idem] = (intent_id, req_hash)
         self.audit.append(intent_id, "INTENT_RECEIVED", {"agent_claimed_untrusted": {
             "merchant_reference": merchant_reference, "product_reference": product_reference,
             "quantity": quantity, "source_url": source_url}})
@@ -156,7 +190,7 @@ class TrustService:
         rec["flags"] = flags
         self.audit.append(intent_id, "CONTEXT_SCANNED", [f.__dict__ for f in flags])
 
-        decision = evaluate(policy, facts, self._spent(policy_id), flags)
+        decision = evaluate(policy, facts, self._committed(policy_id), flags)
         rec["decision"], rec["reasons"] = decision.decision, list(decision.reasons)
         rec["checks"] = list(decision.checks)
         self.audit.append(intent_id, "DECISION", {"decision": decision.decision,
@@ -168,13 +202,19 @@ class TrustService:
         elif decision.decision == "APPROVAL_REQUIRED":
             rec["state"] = "HELD_FOR_APPROVAL"
             rec["expires_at"] = self.clock() + timedelta(minutes=policy.approval_expiry_minutes)
-            self.audit.append(intent_id, "HELD_FOR_APPROVAL", {"expires_at": rec["expires_at"].isoformat()})
+            rec["reserved"] = facts.amount  # held intents reserve budget until captured/declined/expired/revoked
+            self.audit.append(intent_id, "HELD_FOR_APPROVAL", {"expires_at": rec["expires_at"].isoformat(),
+                                                               "reserved_amount": str(facts.amount)})
         else:
             self._execute(rec)
         return self._agent_view(rec)
 
     # ---- human-only approval surface ---------------------------------------
     def approve(self, session_token, intent_id):
+        with self._lock:
+            return self._approve(session_token, intent_id)
+
+    def _approve(self, session_token, intent_id):
         rec = self._human_checked(session_token, intent_id)
         policy = self.policies[rec["policy_id"]]
         if self.clock() > rec["expires_at"]:
@@ -190,10 +230,20 @@ class TrustService:
             rec["state"] = "BLOCKED"
             self.audit.append(intent_id, "APPROVAL_REFUSED_FACTS_CHANGED", {})
             raise ApprovalError("TRUSTED_FACTS_CHANGED")
+        # Atomic (under self._lock) budget re-check: captured spend plus every OTHER live reservation.
+        policy_now = self.policies[rec["policy_id"]]
+        available = (policy_now.max_total_spend - self._captured(rec["policy_id"])
+                     - self._reserved(rec["policy_id"], exclude=intent_id))
+        if rec["facts"].amount > available:
+            rec["state"] = "BLOCKED"
+            rec["reserved"] = Decimal("0")
+            self.audit.append(intent_id, "APPROVAL_REFUSED_BUDGET_EXCEEDED",
+                              {"amount": str(rec["facts"].amount), "available": str(available)})
+            raise ApprovalError("CUMULATIVE_BUDGET_EXCEEDED")
         old = rec["facts"]
         pairs = [("Merchant verified", fresh.merchant_id == old.merchant_id),
                  ("Product verified", fresh.product_id == old.product_id),
-                 ("Payee verified", fresh.payee_id == old.payee_id),
+                 ("Configured payee binding verified", fresh.payee_id == old.payee_id),
                  ("Amount verified", fresh.amount == old.amount),
                  ("Currency verified", fresh.currency == old.currency),
                  ("Policy version verified", policy.version == rec["policy_version"]),
@@ -201,14 +251,20 @@ class TrustService:
         rec["binding_checks"] = [name for name, passed in pairs if passed]  # all pass if we got here
         rec["approver"] = self.auth.session_user(session_token)
         rec["state"] = "APPROVED"
+        rec["reserved"] = Decimal("0")  # reservation converts to captured spend when _execute succeeds
         self.audit.append(intent_id, "APPROVED", {"by": rec["approver"],
                                                   "binding_checks": rec["binding_checks"]})
         self._execute(rec)
         return self._agent_view(rec)
 
     def decline(self, session_token, intent_id):
+        with self._lock:
+            return self._decline(session_token, intent_id)
+
+    def _decline(self, session_token, intent_id):
         rec = self._human_checked(session_token, intent_id)
         rec["state"] = "DECLINED"
+        rec["reserved"] = Decimal("0")
         self.audit.append(intent_id, "DECLINED", {"by": self.auth.session_user(session_token)})
         return self._agent_view(rec)
 
@@ -291,9 +347,23 @@ class TrustService:
                                      f"page: {page_merchant.name}; payment proposed to: {facts.merchant_name}"))
         return flags
 
-    def _spent(self, policy_id):
+    def _captured(self, policy_id):
         return sum((r["facts"].amount for r in self._intents.values()
                     if r["policy_id"] == policy_id and r["state"] == "CAPTURED"), Decimal("0"))
+
+    def _reserved(self, policy_id, exclude=None):
+        """Budget held by live approval-pending intents. Expired, declined, revoked-policy or
+        stale-version holds reserve nothing."""
+        policy = self.policies[policy_id]
+        now = self.clock()
+        return sum((r["facts"].amount for r in self._intents.values()
+                    if r["policy_id"] == policy_id and r["intent_id"] != exclude
+                    and r["state"] == "HELD_FOR_APPROVAL" and r["expires_at"] >= now
+                    and policy.status == "ACTIVE" and r["policy_version"] == policy.version),
+                   Decimal("0"))
+
+    def _committed(self, policy_id):
+        return self._captured(policy_id) + self._reserved(policy_id)
 
     def _execute(self, rec):
         facts = rec["facts"]

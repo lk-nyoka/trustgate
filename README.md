@@ -72,7 +72,7 @@ cd "C:\Users\ASUS\Desktop\Coding Projects\Build or Die\Week 3\Hackathon\paypal\t
 Expected result:
 
 ```text
-87 passed
+105 passed
 ```
 
 Avoid running `live_check.py` just to open the frontend; it creates real PayPal Sandbox payments and should only be used when you intentionally want to verify the live payment integration.
@@ -183,7 +183,7 @@ Audit Log                    ← SHA-256 hash-chained, append-only
 - **Environment:** PayPal Sandbox only; all merchants and payment scenarios are fictional.
 - **Payment flow:** PayPal Orders v2 create-and-capture flow using the validated saved-payment-token path.
 - **Credential boundary:** PayPal credentials and the vault token remain server-side and are never exposed to the agent or browser.
-- **Read-back verification:** After capture, the adapter re-reads the PayPal order and verifies completion status, capture status, amount, currency, and internal intent reference.
+- **Read-back verification:** After capture, the adapter re-reads the PayPal order and confirms order/capture completion, amount, currency, and the internal merchant/payee binding represented in the Sandbox order (`custom_id`). All demo merchants share one Sandbox business account, so this prototype does **not** provide universal PayPal recipient-identity verification; the UI labels this check "Configured payee binding verified".
 - **Blocked requests:** Blocked requests do not create a PayPal order.
 - **Human approval:** PayPal execution occurs only after the middleware confirms the held intent is still valid and the authenticated user has approved it.
 
@@ -219,7 +219,7 @@ python -m pytest -q
 
 ### Application and frontend verification
 
-- **87 tests passed** with `python -m pytest -q`
+- **105 tests passed** with `python -m pytest -q`
 - React production build succeeds with `npm run build` from `frontend/`
 - Desktop and mobile layouts checked; reduced-motion behavior is supported
 - Sign-in journey covers empty, invalid, valid, refresh, logout, back-cache protection, and eight-hour expiry
@@ -299,6 +299,13 @@ python -m uvicorn trust_mw.demo_app:app --reload
 ---
 
 ## Known limitations
+
+- Requires **Python 3.12+** (pinned in `.python-version` and `render.yaml`)
+- Budget is cumulative: captured spend plus live held (approval-pending) reservations. Held intents release their reservation when declined, expired or when the policy is revoked, and approval re-checks the remaining budget under a lock
+- Idempotency keys are bound to a canonical payload hash; reusing a `request_id` with a different payload returns HTTP 409
+- The scanner detects selected hidden-content and payment-instruction patterns (hidden JSON-LD, off-screen/CSS-hidden text, visible payment phrases). It is a defense-in-depth signal, not a general prompt-injection detector; HTML comments, `meta`/`alt` attributes and paraphrased instructions are not reliably detected
+- The demo's hostile source context is simulated and supplied to the agent; it is not an agent browsing arbitrary pages
+- Shared review account: a policy revoke affects every visitor until the free service restarts (per-session demo state is planned)
 
 - In-memory state — restart clears all intents
 - Single process, single demo user
