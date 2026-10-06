@@ -323,8 +323,8 @@ def layout(title, body, active_nav="", paypal_mode="fake", stats=None, extra_hea
     pending = stats.get("awaiting", 0)
 
     mode_dot = "●" if paypal_mode == "sandbox" else "○"
-    mode_label = "PayPal Sandbox" if paypal_mode == "sandbox" else "PayPal (fake)"
-    mode_sub = "Governed-only mode" if paypal_mode == "sandbox" else "Offline / fake adapter"
+    mode_label = "PayPal Sandbox" if paypal_mode == "sandbox" else "REVIEW DEMO"
+    mode_sub = "Governed payments" if paypal_mode == "sandbox" else "Hosted mode \u00b7 Simulated payments"
 
     sidebar = f"""
 <aside class="sidebar">
@@ -347,7 +347,7 @@ def layout(title, body, active_nav="", paypal_mode="fake", stats=None, extra_hea
   </ul>
   <div class="sb-bottom">
     <div class="paypal-mode">
-      <div class="mode-label">Payment mode</div>
+      <div class="mode-label">Environment</div>
       <div class="mode-val"><span class="live-dot" style="{'background:var(--ok)' if paypal_mode=='sandbox' else 'background:var(--fg3);animation:none'}"></span>{esc(mode_label)}</div>
       <div class="mode-sub">{esc(mode_sub)}</div>
     </div>

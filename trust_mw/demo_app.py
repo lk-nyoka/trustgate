@@ -1,7 +1,7 @@
 """Runnable demo server.  uvicorn trust_mw.demo_app:app --port 8000
 
-PAYPAL_MODE=fake (default, offline) or sandbox (needs .env and .vault_token.json).
-Credentials are printed at startup unless you set AGENT_API_KEY / DEMO_PASSWORD / ADMIN_KEY.
+PAYPAL_MODE=fake (default): hosted review mode, per-session workspaces, simulated payments.
+PAYPAL_MODE=sandbox: local single-user mode with the real PayPal Sandbox adapter (.env + .vault_token.json).
 
 On startup, three demo purchase intents are seeded automatically:
   1. $180 CPT→JNB economy   → ALLOW → CAPTURED
@@ -13,9 +13,9 @@ import secrets
 
 from .api import create_app
 from .demo_data import DictPages, make_policy
-from .fake_paypal import FakePayPal
 from .registry import demo_registry
 from .service import AuthStore, TrustService
+from .workspaces import seed_demo_intents
 
 
 def build():
@@ -26,99 +26,80 @@ def build():
         pass
 
     mode = os.getenv("PAYPAL_MODE", "fake")
-    if mode == "sandbox":
-        from .paypal_adapter import PayPalAdapter
-        payments = PayPalAdapter.from_env()
-    else:
-        payments = FakePayPal()
+    password = os.getenv("DEMO_PASSWORD") or secrets.token_urlsafe(8)
+    admin_key = os.getenv("ADMIN_KEY") or None
+    cookie_secure = os.getenv("COOKIE_SECURE") == "1"
 
-    policy = make_policy()
-    auth = AuthStore()
-
-    agent_key = os.getenv("AGENT_API_KEY") or "agent_" + secrets.token_urlsafe(16)
-    password   = os.getenv("DEMO_PASSWORD")  or secrets.token_urlsafe(8)
-    admin_key  = os.getenv("ADMIN_KEY")       or None
-
-    auth.register_agent(agent_key, policy.user_id, policy.policy_id)
-
-    svc = TrustService(
-        demo_registry(),
-        {policy.policy_id: policy},
-        auth,
-        payments,
-        DictPages(),
-    )
-
-    assistant_runner = None
+    anthropic_client = None
     if os.getenv("ANTHROPIC_API_KEY"):
         try:
             from anthropic import Anthropic
-            from .assistant import AssistantRunner
-            assistant_runner = AssistantRunner(
-                Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"]),
-                svc,
-                agent_key,
-                os.getenv("ANTHROPIC_MODEL", "claude-sonnet-5-5"),
-            )
+            anthropic_client = Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
         except ImportError:
             print("[assistant] Install requirements to enable the Anthropic assistant.")
+    model = os.getenv("ANTHROPIC_MODEL", "claude-sonnet-5-5")
 
-    # ── Seed the three demo scenarios ─────────────────────────────────────
-    _seed_demo_intents(svc, agent_key)
+    def make_runner(svc, agent_key):
+        if anthropic_client is None:
+            return None
+        from .assistant import AssistantRunner
+        return AssistantRunner(anthropic_client, svc, agent_key, model)
+
+    if mode != "sandbox":
+        # Hosted / review mode: every login gets its own isolated workspace with fake payments.
+        # This path never loads PayPal credentials.
+        from .workspaces import DemoWorkspaces, make_review_workspace_factory
+        workspaces = DemoWorkspaces(make_review_workspace_factory(
+            make_runner if anthropic_client else None))
+        app = create_app(
+            None,
+            {"demo": ("user_1", password)},
+            csrf_secret=secrets.token_urlsafe(32),
+            admin_key=admin_key,
+            cookie_secure=cookie_secure,
+            paypal_mode="fake",
+            workspaces=workspaces,
+        )
+        print(f"\n{'='*56}")
+        print("  TrustGate REVIEW DEMO (per-session workspaces)")
+        print("  Payments : SIMULATED (fake adapter, no PayPal calls)")
+        print(f"  Assistant: {'Anthropic' if anthropic_client else 'scripted demo'}")
+        print(f"  Login    : demo / {password}  (each login = fresh workspace)")
+        print("  URL      : http://localhost:8000")
+        print(f"{'='*56}\n")
+        return app
+
+    # Local PayPal Sandbox integration: one shared service backed by the real adapter.
+    from .paypal_adapter import PayPalAdapter
+    payments = PayPalAdapter.from_env()
+    policy = make_policy()
+    auth = AuthStore()
+    agent_key = os.getenv("AGENT_API_KEY") or "agent_" + secrets.token_urlsafe(16)
+    auth.register_agent(agent_key, policy.user_id, policy.policy_id)
+    svc = TrustService(demo_registry(), {policy.policy_id: policy}, auth, payments, DictPages())
+    assistant_runner = make_runner(svc, agent_key)
+    seed_demo_intents(svc, agent_key)
 
     app = create_app(
         svc,
         {"demo": (policy.user_id, password)},
         csrf_secret=secrets.token_urlsafe(32),
         admin_key=admin_key,
-        cookie_secure=os.getenv("COOKIE_SECURE") == "1",
-        paypal_mode=mode,
+        cookie_secure=cookie_secure,
+        paypal_mode="sandbox",
         demo_agent_key=agent_key,
         assistant_runner=assistant_runner,
     )
-
     print(f"\n{'='*56}")
-    print(f"  TrustGate demo server")
-    print(f"  Payments : {mode}")
+    print("  TrustGate (local) - PayPal Sandbox")
     print(f"  Assistant: {'Anthropic' if assistant_runner else 'scripted demo'}")
     print(f"  Login    : demo / {password}")
     print(f"  API key  : {agent_key}")
     if admin_key:
         print(f"  Admin key: {admin_key}")
-    print(f"  URL      : http://localhost:8000")
+    print("  URL      : http://localhost:8000")
     print(f"{'='*56}\n")
-
     return app
-
-
-def _seed_demo_intents(svc, agent_key):
-    """Inject the three canonical demo scenarios into the service directly.
-
-    We call propose_purchase via the internal agent key so every scenario
-    goes through the full policy + scanner + audit pipeline.  The $320
-    flexible-flight is left in HELD_FOR_APPROVAL (no approve call) so the
-    console shows a live actionable request on first load.
-    """
-    scenarios = [
-        # (merchant_ref, product_ref, source_url, request_id)
-        ("merchant_demo_airlines",        "cpt-jnb-economy-180", "https://demo-airlines.test/checkout",    "seed-180"),
-        ("merchant_demo_airlines",        "cpt-jnb-flex-320",    "https://demo-airlines.test/checkout",    "seed-320"),
-        ("merchant_activation_services",  "activation-fee-3",    "https://demo-airlines.test/injected-fee","seed-fee"),
-    ]
-
-    for merchant_ref, product_ref, url, req_id in scenarios:
-        try:
-            svc.propose_purchase(
-                agent_key,
-                merchant_ref,
-                product_ref,
-                quantity=1,
-                source_url=url,
-                request_id=req_id,
-            )
-        except Exception as exc:
-            # If something goes wrong seeding (e.g. sandbox key error), keep going
-            print(f"[seed] warning: {req_id} → {exc}")
 
 
 app = build()

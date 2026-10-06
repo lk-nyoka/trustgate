@@ -9,6 +9,7 @@ import hmac
 import html
 import json
 import re
+import contextvars
 import secrets
 import uuid
 from typing import Optional
@@ -22,6 +23,7 @@ from pydantic import BaseModel, ConfigDict, Field, StrictInt
 
 from .landing import landing_page
 from .service import ApprovalError, AuthError, IdempotencyConflict
+from .workspaces import RateLimited
 from .ui_shell import (CSS, EVENT_LABELS, BLOCK_LABELS, chip, checks_html,
                        flow_html, fmt_expiry, layout, reason_label, esc)
 
@@ -273,10 +275,76 @@ body{{min-height:100%;background:var(--bg);padding:24px}}
 # ── App factory ───────────────────────────────────────────────────────────────
 
 def create_app(svc, users, csrf_secret, admin_key=None, cookie_secure=False,
-               paypal_mode="fake", demo_agent_key=None, assistant_runner=None):
-    """users: {username: (user_id, password)}."""
+               paypal_mode="fake", demo_agent_key=None, assistant_runner=None, workspaces=None):
+    """users: {username: (user_id, password)}.
+
+    workspaces: optional DemoWorkspaces. When given (hosted review mode) every login gets its own
+    isolated TrustService and `svc` is ignored; all state below resolves per request."""
     app = FastAPI(title="TrustGate", docs_url=None, redoc_url=None)
-    auth = svc.auth
+    base_agent_key, base_runner = demo_agent_key, assistant_runner
+    current_ws = contextvars.ContextVar("trustgate_workspace", default=None)
+
+    class _Live:
+        """Forwards attribute access to the current request's workspace object."""
+        def __init__(self, pick):
+            self._pick = pick
+
+        def __getattr__(self, name):
+            return getattr(self._pick(), name)
+
+    def _ws():
+        ws = current_ws.get()
+        if ws is None:
+            raise AuthError("no review workspace for this request")
+        return ws
+
+    if workspaces is not None:
+        svc = _Live(lambda: _ws().svc)
+        auth = _Live(lambda: _ws().svc.auth)
+    else:
+        auth = svc.auth
+
+    def agent_key_now():
+        return _ws().agent_key if workspaces is not None else base_agent_key
+
+    def runner_now():
+        return _ws().assistant_runner if workspaces is not None else base_runner
+
+    def adapter_label():
+        return "PAYPAL SANDBOX" if paypal_mode == "sandbox" else "SIMULATED"
+
+    def client_key(request):
+        fwd = request.headers.get("x-forwarded-for", "")
+        return fwd.split(",")[0].strip() or (request.client.host if request.client else "anon")
+
+    def start_session(request, user_id):
+        """Returns (token, ttl_seconds). In review mode each login is a fresh isolated workspace."""
+        if workspaces is None:
+            return auth.issue_session(user_id), auth.session_ttl_seconds
+        ws = workspaces.create(client_key(request))
+        current_ws.set(ws)
+        return workspaces.issue_session(ws), ws.svc.auth.session_ttl_seconds
+
+    def end_session(token):
+        auth.revoke_session(token)
+        if workspaces is not None and current_ws.get() is not None:
+            workspaces.discard(current_ws.get())
+
+    @app.middleware("http")
+    async def bind_workspace(request: Request, call_next):
+        if workspaces is not None:
+            ws = None
+            tok = request.cookies.get(COOKIE)
+            if tok:
+                ws = workspaces.by_token(tok)
+            if ws is None:
+                h = request.headers.get("authorization", "")
+                if h.lower().startswith("bearer "):
+                    ws = workspaces.by_agent_key(h[7:].strip())
+            if ws is not None:
+                workspaces.touch(ws)
+            current_ws.set(ws)
+        return await call_next(request)
 
     # CORS — allow the React dev server (port 5173) and same origin
     app.add_middleware(
@@ -330,7 +398,7 @@ def create_app(svc, users, csrf_secret, admin_key=None, cookie_secure=False,
     # ── Public routes ──────────────────────────────────────────────────────
     @app.get("/", response_class=HTMLResponse)
     def landing():
-        return landing_page(svc.stats())
+        return landing_page(svc.stats() if (workspaces is None or current_ws.get()) else {"captured": 0, "awaiting": 0, "blocked": 0})
 
     @app.get("/login", response_class=HTMLResponse)
     def login_form():
@@ -342,10 +410,14 @@ def create_app(svc, users, csrf_secret, admin_key=None, cookie_secure=False,
         entry = users.get(form.get("username") or "")
         if not entry or not hmac.compare_digest(entry[1], form.get("password") or ""):
           return _login_page("Wrong username or password.", status_code=401)
+        try:
+            session_token, ttl = start_session(request, entry[0])
+        except RateLimited:
+            return _login_page("Too many sign-ins. Wait a minute and try again.", status_code=429)
         resp = RedirectResponse("/console", status_code=303)
-        resp.set_cookie(COOKIE, auth.issue_session(entry[0]),
+        resp.set_cookie(COOKIE, session_token,
                         httponly=True, samesite="strict", secure=cookie_secure,
-                        max_age=auth.session_ttl_seconds)
+                        max_age=ttl)
         return resp
 
     @app.post("/logout")
@@ -354,7 +426,7 @@ def create_app(svc, users, csrf_secret, admin_key=None, cookie_secure=False,
         resp = RedirectResponse("/login", status_code=303)
         form = await request.form()
         if user and csrf_ok(token, form.get("csrf")):
-            auth.revoke_session(token)
+            end_session(token)
             resp.delete_cookie(COOKIE)
         return resp
 
@@ -371,10 +443,13 @@ def create_app(svc, users, csrf_secret, admin_key=None, cookie_secure=False,
         entry = users.get(body.get("username") or "")
         if not entry or not hmac.compare_digest(entry[1], body.get("password") or ""):
             return JSONResponse({"detail": "Invalid credentials"}, status_code=401)
-        token = auth.issue_session(entry[0])
+        try:
+            token, ttl = start_session(request, entry[0])
+        except RateLimited:
+            return JSONResponse({"detail": "Too many sign-ins. Wait a minute and try again."}, status_code=429)
         resp = JSONResponse({"ok": True, "csrf": csrf_for(token)})
         resp.set_cookie(COOKIE, token, httponly=True, samesite="lax",
-                        secure=cookie_secure, max_age=auth.session_ttl_seconds)
+                        secure=cookie_secure, max_age=ttl)
         return resp
 
     @app.post("/api/logout")
@@ -385,7 +460,7 @@ def create_app(svc, users, csrf_secret, admin_key=None, cookie_secure=False,
         body = await request.json()
         if not csrf_ok(token, body.get("csrf")):
             return JSONResponse({"detail": "bad CSRF token"}, status_code=403)
-        auth.revoke_session(token)
+        end_session(token)
         resp = JSONResponse({"ok": True})
         resp.delete_cookie(COOKIE)
         return resp
@@ -403,7 +478,10 @@ def create_app(svc, users, csrf_secret, admin_key=None, cookie_secure=False,
             "user_id": user,
             "csrf": csrf,
             "paypal_mode": paypal_mode,
-            "assistant_mode": "anthropic" if assistant_runner else "scripted",
+            "adapter": adapter_label(),
+            "review_workspace": workspaces is not None,
+            "review_agent_key": agent_key_now() if workspaces is not None else None,
+            "assistant_mode": "anthropic" if runner_now() else "scripted",
             "stats": stats,
             "policy": {
                 "policy_id": policy.policy_id,
@@ -488,10 +566,10 @@ def create_app(svc, users, csrf_secret, admin_key=None, cookie_secure=False,
             return JSONResponse({"detail": "auth required"}, status_code=401)
         if not csrf_ok(token, body.csrf):
             return JSONResponse({"detail": "bad CSRF token"}, status_code=403)
-        if not demo_agent_key:
+        if not agent_key_now():
             return JSONResponse({"detail": "demo agent is not configured"}, status_code=503)
         try:
-            agent_user, _ = auth.agent(demo_agent_key)
+            agent_user, _ = auth.agent(agent_key_now())
         except AuthError:
             return JSONResponse({"detail": "demo agent is not configured"}, status_code=503)
         if agent_user != user:
@@ -503,7 +581,7 @@ def create_app(svc, users, csrf_secret, admin_key=None, cookie_secure=False,
                       if product.product_id == "activation-fee-3"
                       else "https://demo-airlines.test/checkout")
         result = svc.propose_purchase(
-            demo_agent_key,
+            agent_key_now(),
             product.merchant_id,
             product.product_id,
             quantity=1,
@@ -521,16 +599,18 @@ def create_app(svc, users, csrf_secret, admin_key=None, cookie_secure=False,
             return JSONResponse({"detail": "auth required"}, status_code=401)
         if not csrf_ok(token, body.csrf):
             return JSONResponse({"detail": "bad CSRF token"}, status_code=403)
-        if not assistant_runner:
+        if not runner_now():
             return JSONResponse({"detail": "language model is not configured"}, status_code=503)
+        if workspaces is not None and not workspaces.allow_chat(current_ws.get()):
+            return JSONResponse({"detail": "review workspace chat limit reached; reset the workspace"}, status_code=429)
         try:
-            agent_user, _ = auth.agent(demo_agent_key)
+            agent_user, _ = auth.agent(agent_key_now())
         except AuthError:
             return JSONResponse({"detail": "demo agent is not configured"}, status_code=503)
         if agent_user != user:
             return JSONResponse({"detail": "demo agent is not bound to this user"}, status_code=403)
         try:
-            return jsonable_encoder(assistant_runner.run(user, body.message))
+            return jsonable_encoder(runner_now().run(user, body.message))
         except Exception:
             return JSONResponse({"detail": "assistant request failed; no action was confirmed"}, status_code=502)
 
@@ -661,6 +741,11 @@ def create_app(svc, users, csrf_secret, admin_key=None, cookie_secure=False,
     def audit_json(intent_id: str, request: Request):
         supplied = request.headers.get("x-admin-key")
         if admin_key and supplied and hmac.compare_digest(admin_key, supplied):
+            if workspaces is not None:
+                owner = workspaces.find_intent(intent_id)
+                if owner is None:
+                    return err("not found", 404)
+                current_ws.set(owner)
             events = svc.get_audit(intent_id)
         else:
             _, user = human(request)
@@ -699,6 +784,47 @@ def create_app(svc, users, csrf_secret, admin_key=None, cookie_secure=False,
             status = 403 if code == "NOT_DELEGATING_USER" else 404 if code == "UNKNOWN_INTENT" else 409
             return err(code, status)
         return RedirectResponse(f"/approvals/{intent_id}", status_code=303)
+
+    def _reset_current(token):
+        """Reset only this reviewer's workspace. Returns (new_token, error_response)."""
+        if workspaces is None:
+            return None, err("workspace reset is only available in the hosted review demo", 404)
+        try:
+            return workspaces.reset(current_ws.get()), None
+        except RateLimited as exc:
+            return None, err(str(exc), 429)
+
+    @app.post("/api/demo/reset")
+    async def api_demo_reset(request: Request):
+        token, user = human(request)
+        if not user:
+            return err("auth required", 401)
+        body = await request.json()
+        if not csrf_ok(token, body.get("csrf")):
+            return err("bad CSRF token", 403)
+        new_token, error = _reset_current(token)
+        if error:
+            return error
+        resp = JSONResponse({"ok": True, "csrf": csrf_for(new_token)})
+        resp.set_cookie(COOKIE, new_token, httponly=True, samesite="lax", secure=cookie_secure,
+                        max_age=current_ws.get().svc.auth.session_ttl_seconds)
+        return resp
+
+    @app.post("/demo/reset")
+    async def demo_reset(request: Request):
+        token, user = human(request)
+        if not user:
+            return err("human login required", 401)
+        form = await request.form()
+        if not csrf_ok(token, form.get("csrf")):
+            return err("bad CSRF token", 403)
+        new_token, error = _reset_current(token)
+        if error:
+            return error
+        resp = RedirectResponse("/console", status_code=303)
+        resp.set_cookie(COOKIE, new_token, httponly=True, samesite="strict", secure=cookie_secure,
+                        max_age=current_ws.get().svc.auth.session_ttl_seconds)
+        return resp
 
     @app.post("/policy/revoke")
     async def revoke(request: Request):
@@ -755,6 +881,15 @@ def create_app(svc, users, csrf_secret, admin_key=None, cookie_secure=False,
 
         # ── stats row ────────────────────────────────────────────────────────
         policy = next((p for p in svc.policies.values()), None)
+        reset_form = (
+            f'<form method="post" action="/demo/reset" style="margin-top:8px" '
+            f'onsubmit="return confirm(\'Reset this review workspace? This removes demo intents and '
+            f'restores the three scripted scenarios.\')">'
+            f'<input type="hidden" name="csrf" value="{csrf_for(token)}">'
+            f'<button class="btn btn-sm">&#8634; Reset review workspace</button></form>'
+            f'<p style="font-size:11px;color:var(--fg3);margin-top:6px">Review workspace: your revokes, '
+            f'approvals and resets affect only this session.</p>'
+        ) if workspaces is not None else ""
         policy_label = f"travel.v{policy.version}" if policy else "—"
         blocked = stats.get("blocked", 0)
 
@@ -844,6 +979,7 @@ def create_app(svc, users, csrf_secret, admin_key=None, cookie_secure=False,
     <input type="hidden" name="csrf" value="{csrf_for(token)}">
     <button class="btn btn-danger btn-sm">⚠ Revoke policy (kill switch)</button>
   </form>
+  {reset_form}
 </div>"""
 
         body = f"""
@@ -860,12 +996,12 @@ Developers give agents one governed purchase tool instead of raw PayPal payment 
     <div class="assistant-head">
       <div><div class="assistant-kicker">AI purchase assistant</div>
         <div class="assistant-subtitle">Search registry products, inspect trusted facts, then send a governed proposal.</div></div>
-      <span class="demo-agent-tag">{'Anthropic tool agent' if assistant_runner else 'Scripted demo agent'}</span>
+      <span class="demo-agent-tag">{'Anthropic tool agent' if runner_now() else 'Scripted demo agent'}</span>
     </div>
-    <div class="agent-note">{'The model can only search products, inspect registry facts, and submit governed proposals. TrustGate still controls authorization.' if assistant_runner else 'This local walkthrough uses a scripted agent, not a live language model. Every proposal still passes through TrustGate policy.'}</div>
+    <div class="agent-note">{'The model can only search products, inspect registry facts, and submit governed proposals. TrustGate still controls authorization.' if runner_now() else 'This local walkthrough uses a scripted agent, not a live language model. Every proposal still passes through TrustGate policy.'}</div>
     <div class="agent-thread" id="agent-thread" aria-live="polite">
       <div class="agent-message user"><span>You</span><p>Book me a direct flight to Johannesburg under $500. Ask me above $250.</p></div>
-      <div class="agent-message"><span>Agent</span><p>{'Ready to search the registered catalog. Any purchase proposal will pass through TrustGate policy.' if assistant_runner else 'I found two registered Demo Airlines options. The $180 fare is within the automatic limit; the $320 fare needs your approval.'}</p></div>
+      <div class="agent-message"><span>Agent</span><p>{'Ready to search the registered catalog. Any purchase proposal will pass through TrustGate policy.' if runner_now() else 'I found two registered Demo Airlines options. The $180 fare is within the automatic limit; the $320 fare needs your approval.'}</p></div>
     </div>
     <div id="agent-results" class="agent-results" aria-live="polite"><div class="agent-loading">Searching the product registry…</div></div>
     <form id="agent-request-form" class="agent-form">
@@ -950,7 +1086,7 @@ document.addEventListener('DOMContentLoaded',()=>{{
   const requestInput=document.getElementById('agent-request');
   const decisionBox=document.getElementById('decision-box');
   const approvalLink=document.getElementById('approval-link');
-  const modelEnabled={json.dumps(bool(assistant_runner))};
+  const modelEnabled={json.dumps(bool(runner_now()))};
   let approvalPoll;
   const money=(amount,currency)=>new Intl.NumberFormat('en-US',{{style:'currency',currency}}).format(Number(amount));
   function message(role,text,isUser=false){{const wrap=document.createElement('div');wrap.className='agent-message'+(isUser?' user':'');const name=document.createElement('span');name.textContent=role;const body=document.createElement('p');body.textContent=text;wrap.append(name,body);thread.append(wrap);thread.scrollTop=thread.scrollHeight}}
@@ -1125,7 +1261,8 @@ document.addEventListener('DOMContentLoaded',()=>{{
                     ]
                 if v["order_id"]:
                     rows += [
-                        ("PayPal order", f'<code>{esc(str(v["order_id"]))}</code>'),
+                        ("Adapter", esc(adapter_label())),
+                        ("Order ID", f'<code>{esc(str(v["order_id"]))}</code>'),
                         ("Capture ID", f'<code>{esc(str(v["capture_id"]))}</code>'),
                     ]
 
@@ -1200,7 +1337,8 @@ document.addEventListener('DOMContentLoaded',()=>{{
                     ("Policy decision", chip(v["decision"])),
                     ("Approval", chip(v["approval_status"])),
                     ("Payment state", chip(state)),
-                    ("PayPal order", f'<code>{esc(str(v["order_id"]))}</code>'),
+                    ("Adapter", esc(adapter_label())),
+                    ("Order ID", f'<code>{esc(str(v["order_id"]))}</code>'),
                     ("Capture ID", f'<code>{esc(str(v["capture_id"]))}</code>'),
                 ]:
                     detail_rows += f'<dt style="color:var(--fg3);font-size:12px">{k}</dt><dd style="font-size:13px">{val}</dd>'
@@ -1369,7 +1507,8 @@ document.addEventListener('DOMContentLoaded',()=>{{
     <dt style="color:var(--fg3);font-size:12px">Policy decision</dt><dd>{chip("APPROVAL_REQUIRED")}</dd>
     <dt style="color:var(--fg3);font-size:12px">Approval</dt><dd>{chip("APPROVED")}</dd>
     <dt style="color:var(--fg3);font-size:12px">Payment state</dt><dd>{chip("CAPTURED")}</dd>
-    <dt style="color:var(--fg3);font-size:12px">PayPal order</dt>
+    <dt style="color:var(--fg3);font-size:12px">Adapter</dt><dd>{esc(adapter_label())}</dd>
+    <dt style="color:var(--fg3);font-size:12px">Order ID</dt>
     <dd><code>{esc(str(v["order_id"]))}</code></dd>
     <dt style="color:var(--fg3);font-size:12px">Capture ID</dt>
     <dd><code>{esc(str(v["capture_id"]))}</code></dd>

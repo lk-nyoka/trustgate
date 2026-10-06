@@ -72,7 +72,7 @@ cd "C:\Users\ASUS\Desktop\Coding Projects\Build or Die\Week 3\Hackathon\paypal\t
 Expected result:
 
 ```text
-105 passed
+120 passed
 ```
 
 Avoid running `live_check.py` just to open the frontend; it creates real PayPal Sandbox payments and should only be used when you intentionally want to verify the live payment integration.
@@ -219,7 +219,7 @@ python -m pytest -q
 
 ### Application and frontend verification
 
-- **105 tests passed** with `python -m pytest -q`
+- **120 tests passed** with `python -m pytest -q`
 - React production build succeeds with `npm run build` from `frontend/`
 - Desktop and mobile layouts checked; reduced-motion behavior is supported
 - Sign-in journey covers empty, invalid, valid, refresh, logout, back-cache protection, and eight-hour expiry
@@ -241,6 +241,21 @@ python -m pytest -q
 > Sandbox payment results are historical integration evidence, separate from the current automated tests and local frontend build. The public Render demo uses `PAYPAL_MODE=fake`; it never submits payments to PayPal.
 
 ---
+
+## Which UI should judges use?
+
+The **server-rendered console** (`/console`, served by `trust_mw/api.py`) is the authoritative interface and the one deployed on Render. The React app in `frontend/` is an optional, experimental client for the same JSON API (`npm install && npm run build`, then open `/app`); it is not part of the hosted deployment path.
+
+## Review demo vs. PayPal Sandbox
+
+| | Hosted review demo (`PAYPAL_MODE=fake`, default) | Local integration (`PAYPAL_MODE=sandbox`) |
+|---|---|---|
+| Payments | **Simulated** fake adapter, never contacts PayPal, no credentials loaded | Real PayPal Sandbox Orders v2 |
+| State | **One isolated workspace per login**: fresh active policy, the $180 / $320 / $3 scenarios, own audit chain and kill switch | One shared in-memory service |
+| UI banner | `REVIEW DEMO · Hosted mode · Simulated payments`, `Adapter: SIMULATED` | `PayPal Sandbox · Governed payments`, `Adapter: PAYPAL SANDBOX` |
+| Reset | `Reset review workspace` button / `POST /api/demo/reset` (session + CSRF, rate-limited) restores only your workspace | n/a |
+
+One reviewer revoking the policy, approving purchases or resetting never affects another reviewer. The sandbox path needs `.env` credentials and `.vault_token.json` and is run locally with `PAYPAL_MODE=sandbox`.
 
 ## Public review deployment
 
@@ -305,7 +320,7 @@ python -m uvicorn trust_mw.demo_app:app --reload
 - Idempotency keys are bound to a canonical payload hash; reusing a `request_id` with a different payload returns HTTP 409
 - The scanner detects selected hidden-content and payment-instruction patterns (hidden JSON-LD, off-screen/CSS-hidden text, visible payment phrases). It is a defense-in-depth signal, not a general prompt-injection detector; HTML comments, `meta`/`alt` attributes and paraphrased instructions are not reliably detected
 - The demo's hostile source context is simulated and supplied to the agent; it is not an agent browsing arbitrary pages
-- Shared review account: a policy revoke affects every visitor until the free service restarts (per-session demo state is planned)
+- Hosted review demo state is in memory: each login gets its own isolated workspace (idle workspaces are evicted after 2 hours, at most 200 live, sign-ins and resets are rate-limited), but everything is lost when the free Render service sleeps or restarts
 
 - In-memory state — restart clears all intents
 - Single process, single demo user
