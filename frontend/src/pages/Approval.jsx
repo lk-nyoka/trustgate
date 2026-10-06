@@ -8,7 +8,7 @@ import FlowDiagram from '../components/FlowDiagram'
 const BINDING_LABELS = [
   'Merchant verified',
   'Product verified',
-  'Payee verified',
+  'Configured payee binding verified',
   'Amount verified',
   'Currency verified',
   'Policy version verified',
