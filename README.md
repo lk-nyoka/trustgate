@@ -72,7 +72,7 @@ cd "C:\Users\ASUS\Desktop\Coding Projects\Build or Die\Week 3\Hackathon\paypal\t
 Expected result:
 
 ```text
-182 passed
+187 passed
 ```
 
 Avoid running `live_check.py` just to open the frontend; it creates real PayPal Sandbox payments and should only be used when you intentionally want to verify the live payment integration.
@@ -232,7 +232,7 @@ python -m pytest -q
 
 ### Application and frontend verification
 
-- **182 tests passed** with `python -m pytest -q`
+- **187 tests passed** with `python -m pytest -q`
 - React production build succeeds with `npm run build` from `frontend/`
 - Desktop and mobile layouts checked; reduced-motion behavior is supported
 - Sign-in journey covers empty, invalid, valid, refresh, logout, back-cache protection, and eight-hour expiry
@@ -325,6 +325,10 @@ python -m uvicorn trust_mw.demo_app:app --reload
 ```
 
 ---
+
+## UI glass effect
+
+The login flow panel and the sidebar environment box use [liquid-glass-js](https://github.com/dashersw/liquid-glass-js) (MIT, with html2canvas, vendored in `trust_mw/static/glass/`, licences included). It is decorative progressive enhancement: it is skipped for reduced-motion or reduced-transparency users, narrow screens, no WebGL, or `?glass=off`, and on failure the plain CSS look remains. Forms, approval, audit and payment controls are never wrapped, and labels stay real DOM text.
 
 ## Known limitations
 

@@ -184,6 +184,7 @@ def _login_page(error_message=None, status_code=200):
     return HTMLResponse(f"""<!doctype html><html lang="en"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="theme-color" content="#f4f5f7">
+<link rel="stylesheet" href="/static/glass/glass.css">
 <title>Sign in · TrustGate</title>
 <style>
 {CSS}
@@ -281,7 +282,7 @@ body{{min-height:100%;background:var(--bg);padding:24px}}
       <p class="story-value">TrustGate governs every AI-proposed purchase before PayPal execution.</p>
     </div>
     <div>
-      <div class="flow-visual">
+      <div class="flow-visual" data-glass="1" data-glass-tint="0.03">
         <div class="flow-caption"><span>Purchase authorization path</span><span class="flow-health"><i></i>Policy active</span></div>
         <div class="flow-route" aria-hidden="true"><span class="flow-packet"></span></div>
         <div class="flow-nodes">
@@ -311,7 +312,7 @@ body{{min-height:100%;background:var(--bg);padding:24px}}
       </div>
     </div>
   </section>
-</main></body></html>""", status_code=status_code)
+</main><script src="/static/glass/glass-init.js" defer></script></body></html>""", status_code=status_code)
 
 
 # ── App factory ───────────────────────────────────────────────────────────────
@@ -817,6 +818,9 @@ def create_app(svc, users, csrf_secret, admin_key=None, cookie_secure=False,
 
     # ── Serve React static build (production) ─────────────────────────────
     import os, pathlib
+    static_dir = pathlib.Path(__file__).parent / "static"
+    if static_dir.exists():
+        app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
     dist = pathlib.Path(__file__).parent.parent / "frontend" / "dist"
     if dist.exists():
         app.mount("/app", StaticFiles(directory=str(dist), html=True), name="react")

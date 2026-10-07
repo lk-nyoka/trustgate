@@ -1,0 +1,6 @@
+/* Fallback look (always on) + wrapper rules when liquid-glass-js is active. */
+[data-glass]{-webkit-backdrop-filter:blur(8px) saturate(1.25);backdrop-filter:blur(8px) saturate(1.25)}
+[data-glass].glass-on{background:transparent!important;border-color:transparent!important;box-shadow:none!important;
+  -webkit-backdrop-filter:none;backdrop-filter:none;position:relative;z-index:1}
+.glass-container.glass-host{position:relative;display:block;padding:0;gap:0;isolation:isolate;border-radius:inherit}
+.glass-container.glass-host>[data-glass]{width:100%}
