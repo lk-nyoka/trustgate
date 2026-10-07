@@ -1142,9 +1142,9 @@ def create_app(svc, users, csrf_secret, admin_key=None, cookie_secure=False,
     <dt>Policy ID</dt><dd><code>{esc(policy.policy_id)}</code></dd>
     <dt>Approved merchant</dt><dd>{esc(ml)}</dd>
     <dt>Allowed category</dt><dd>{esc(cl)}</dd>
-    <dt>Auto-approve up to</dt><dd>${esc(str(policy.auto_approve_up_to))}</dd>
-    <dt>Max single purchase</dt><dd>${esc(str(policy.max_single_purchase))}</dd>
-    <dt>Total budget</dt><dd>${esc(str(policy.max_total_spend))}</dd>
+    <dt>Auto-approve up to</dt><dd>${policy.auto_approve_up_to:,.2f}</dd>
+    <dt>Max single purchase</dt><dd>${policy.max_single_purchase:,.2f}</dd>
+    <dt>Total budget</dt><dd>${policy.max_total_spend:,.2f}</dd>
   </div>
   <div class="sep"></div>
   {kill_form}

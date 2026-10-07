@@ -53,3 +53,12 @@ def test_kill_switch_and_accessibility_guards_exist():
     js = client().get("/static/glass/glass-init.js").text
     for needle in ("glass=off", "prefers-reduced-motion", "prefers-reduced-transparency", "webglOk"):
         assert needle in js
+
+
+def test_policy_panel_formats_every_amount_with_cents():
+    c = client()
+    c.post("/login", data={"username": "demo", "password": "pw"})
+    html = c.get("/console").text
+    for label, amount in (("Auto-approve up to", "$250.00"), ("Max single purchase", "$500.00"),
+                          ("Total budget", "$1,000.00")):
+        assert re.search(rf"<dt>{label}</dt><dd>\{amount}</dd>", html), label
