@@ -10,72 +10,21 @@ TrustGate is a deterministic authorization middleware that sits between an AI ag
 
 ---
 
-## Quick start (recommended self-contained setup)
+## Quick start
 
-From the app root, not the outer project folder:
-
-```powershell
-cd "C:\Users\ASUS\Desktop\Coding Projects\Build or Die\Week 3\Hackathon\paypal\trust-middleware"
-
-.\.venv\Scripts\Activate.ps1
-python -m uvicorn trust_mw.demo_app:app --reload
-```
-
-Then open:
-
-```text
-http://127.0.0.1:8000/console
-```
-
-If activation is blocked, run without activation:
-
-```powershell
-cd "C:\Users\ASUS\Desktop\Coding Projects\Build or Die\Week 3\Hackathon\paypal\trust-middleware"
-.\.venv\Scripts\python.exe -m uvicorn trust_mw.demo_app:app --reload
-```
-
-If `.venv` does not exist yet:
-
-```powershell
-cd "C:\Users\ASUS\Desktop\Coding Projects\Build or Die\Week 3\Hackathon\paypal\trust-middleware"
-python -m venv .venv
-.\.venv\Scripts\python.exe -m pip install -r requirements.txt
-.\.venv\Scripts\python.exe -m uvicorn trust_mw.demo_app:app --reload
-```
-
-This keeps the app self-contained in `trust-middleware/.venv`, which is the easiest path for judges and clean-clone verification.
-
-### macOS/Linux
+Requires **Python 3.12+**. From `trust-middleware/`:
 
 ```bash
-cd trust-middleware
-python3 -m venv .venv
-source .venv/bin/activate
+python -m venv .venv
+# Windows: .\.venv\Scripts\Activate.ps1      macOS/Linux: source .venv/bin/activate
 python -m pip install -r requirements.txt
-python -m pytest -q
+python -m pytest -q            # expect: 197 passed
 python -m uvicorn trust_mw.demo_app:app --reload
 ```
 
-If PowerShell activation is blocked on Windows, use:
+Open <http://127.0.0.1:8000/login>. The demo username is `demo`; the password is printed in the startup banner (or set `DEMO_PASSWORD`). If PowerShell blocks activation, call `.\.venv\Scripts\python.exe -m ...` directly.
 
-```powershell
-.\.venv\Scripts\python.exe -m uvicorn trust_mw.demo_app:app --reload
-```
-
-Before opening the browser, verify the app from a separate terminal:
-
-```powershell
-cd "C:\Users\ASUS\Desktop\Coding Projects\Build or Die\Week 3\Hackathon\paypal\trust-middleware"
-.\.venv\Scripts\python.exe -m pytest -q
-```
-
-Expected result:
-
-```text
-187 passed
-```
-
-Avoid running `live_check.py` just to open the frontend; it creates real PayPal Sandbox payments and should only be used when you intentionally want to verify the live payment integration.
+The app uses fictional merchants and simulated or Sandbox payments only; never enter real credentials or payment data. Do not run `live_check.py` just to open the UI: it creates real PayPal Sandbox payments.
 
 ---
 
@@ -116,12 +65,6 @@ The judge-facing narrative is:
 3. The governed flow captures the payment.
 4. A malicious $3 request is blocked before PayPal is called.
 5. The audit trail shows the exact decision path.
-
----
-
-## AI integration
-
-When configured, the Anthropic assistant interprets the user's request and may call three tools: `search_products`, `get_product_details`, and `propose_purchase`. Without an API key, a scripted assistant demonstrates the same governed proposal path. In either mode, the scanner and deterministic policy run server-side, and authenticated human approval controls held payments.
 
 ---
 
@@ -232,7 +175,7 @@ python -m pytest -q
 
 ### Application and frontend verification
 
-- **187 tests passed** with `python -m pytest -q`
+- **197 tests passed** with `python -m pytest -q`
 - React production build succeeds with `npm run build` from `frontend/`
 - Desktop and mobile layouts checked; reduced-motion behavior is supported
 - Sign-in journey covers empty, invalid, valid, refresh, logout, back-cache protection, and eight-hour expiry
@@ -278,51 +221,7 @@ The repository is public at <https://github.com/lk-nyoka/trustgate>. GitHub Page
 2. Review the `trustgate-review` web service and deploy it.
 3. Open the generated `*.onrender.com/console` URL.
 
-Review login: username `demo`, password `TrustGateReview2026!`. This is a shared public demo account, the app runs the fake payment adapter, and in-memory state may reset when the free service sleeps or restarts. Do not put real credentials or payment data into this review instance.
-
----
-
-## Demo access
-
-After starting the app, open:
-
-```text
-http://127.0.0.1:8000/console
-```
-
-Use the seeded demo user shown in the application startup output or in the judge setup instructions.
-
-The application is intentionally limited to fictional merchants and PayPal Sandbox data. Do not use real credentials or production payment details.
-
----
-
-## Setup for judges
-
-### Windows
-
-```powershell
-cd trust-middleware
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-python -m pip install -r requirements.txt
-python -m pytest -q
-```
-
-### macOS/Linux
-
-```bash
-cd trust-middleware
-python3 -m venv .venv
-source .venv/bin/activate
-python -m pip install -r requirements.txt
-python -m pytest -q
-```
-
-To launch the app after setup:
-
-```bash
-python -m uvicorn trust_mw.demo_app:app --reload
-```
+Review login: username `demo`; the password is given in the project's Devpost submission. This is a shared public demo account, the app runs the fake payment adapter, and in-memory state may reset when the free service sleeps or restarts. Do not put real credentials or payment data into this review instance.
 
 ---
 
