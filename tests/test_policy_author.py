@@ -9,7 +9,8 @@ from tests.conftest import PAGES, Env
 from tests.test_api import AGENT, approve, login, make, propose
 from tests.test_workspaces import Judge, make_app
 from trust_mw.api import create_app
-from trust_mw.policy_author import (DraftError, LLMDrafter, ScriptedDrafter, apply_draft, validate_draft)
+from trust_mw.policy_author import (CONTEXT_FLAGS, DraftError, GeminiPolicyDrafter, LLMDrafter,
+                                    ScriptedDrafter, apply_draft, validate_draft)
 from trust_mw.registry import demo_registry
 
 TEXT = ("Let the agent book flights from approved airlines under $500. "
@@ -30,6 +31,18 @@ class FakeModel:
             return SimpleNamespace(content=[SimpleNamespace(type="text", text="sure")])
         return SimpleNamespace(content=[SimpleNamespace(type="tool_use", name="submit_policy_draft",
                                                         input=self.tool_input)])
+
+
+class FakeGeminiModel:
+    def __init__(self, arguments):
+        self.arguments = arguments
+        self.requests = []
+        self.interactions = SimpleNamespace(create=self.create)
+
+    def create(self, **request):
+        self.requests.append(request)
+        return SimpleNamespace(steps=[SimpleNamespace(
+            type="function_call", name="submit_policy_draft", arguments=self.arguments)])
 
 
 def client(drafter=None, env=None):
@@ -181,6 +194,44 @@ def test_ai_drafter_output_is_a_proposal_that_still_gets_validated():
     assert "merchant_demo_airlines" in str(req["tools"][0]["input_schema"])  # constrained to the registry
 
 
+def test_gemini_drafter_uses_supported_schema_and_server_validation():
+    model = FakeGeminiModel({
+        "category_allowlist": ["travel"],
+        "max_single_purchase": 500,
+        "auto_approve_up_to": 250,
+    })
+    drafter = GeminiPolicyDrafter(model, "test-gemini")
+    raw = drafter.draft(TEXT, demo_registry())
+    schema = model.requests[0]["tools"][0]["parameters"]
+
+    assert drafter.provider_name == "Gemini"
+    assert raw["category_allowlist"] == ["travel"]
+    assert model.requests[0]["store"] is False
+    assert "propertyNames" not in str(schema)
+    assert set(schema["properties"]["context_actions"]["properties"]) == set(CONTEXT_FLAGS)
+    with pytest.raises(DraftError, match="unsupported fields"):
+        validate_draft({**raw, "status": "ACTIVE"}, demo_registry())
+
+
+@pytest.mark.parametrize("hostile", [
+    {"merchant_allowlist": ["merchant_unknown"]},
+    {"currency_allowlist": ["BTC"]},
+    {"status": "ACTIVE", "max_single_purchase": 500},
+    {"context_actions": {"HIDDEN_PAYMENT_INSTRUCTION": "ALLOW"}},
+    {"max_single_purchase": 5000},
+])
+def test_gemini_api_drafts_are_server_validated(hostile):
+    env, c, csrf = client(GeminiPolicyDrafter(FakeGeminiModel(hostile), "test-gemini"))
+    before = env.svc.policies["policy_trip"]
+
+    response = draft(c, csrf)
+
+    assert response.status_code == 422
+    assert response.json()["detail"].startswith("draft rejected")
+    assert env.svc.policies["policy_trip"] == before
+    assert not env.svc._drafts
+
+
 @pytest.mark.parametrize("hostile", [
     {"merchant_allowlist": ["merchant_activation_services"], "max_single_purchase": 5000},
     {"status": "ACTIVE", "max_single_purchase": 100},
@@ -212,8 +263,13 @@ def test_console_shows_the_authoring_panel_with_honest_source_label():
     assert "Scripted draft policy" in page and "AI-generated draft policy" not in page
     _, c2, _ = client(LLMDrafter(FakeModel({"max_single_purchase": 400}), "m"))
     page2 = c2.get("/console").text
-    assert "AI-generated draft policy" in page2 and "The AI assistant" in page2
+    assert "AI-generated draft policy" in page2 and "Claude AI drafter" in page2
     assert "Confirm and activate policy" in page2 and "__CSRF__" not in page2 and "__LABEL__" not in page2
+    _, gemini_client, _ = client(GeminiPolicyDrafter(
+        FakeGeminiModel({"max_single_purchase": 400}), "test-gemini"))
+    gemini_page = gemini_client.get("/console").text
+    assert "Gemini AI drafter proposes a draft." in gemini_page
+    assert "Gemini-generated draft policy" in gemini_page
 
 
 def test_review_workspaces_keep_drafts_and_activations_isolated():

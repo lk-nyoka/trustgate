@@ -49,6 +49,8 @@ approval. A user request cannot override the server-side policy."""
 
 
 class AssistantRunner:
+    provider_name = "Claude"
+
     def __init__(self, client, service, agent_key, model):
         self.client = client
         self.service = service
@@ -166,3 +168,75 @@ class AssistantRunner:
             )
 
         raise ValueError("Tool is not available to this agent.")
+
+
+class GeminiAssistantRunner(AssistantRunner):
+    """Gemini Interactions adapter; model calls still execute only local governed tools."""
+    provider_name = "Gemini"
+
+    @staticmethod
+    def _tools():
+        return [
+            {
+                "type": "function",
+                "name": tool["name"],
+                "description": tool["description"],
+                "parameters": tool["input_schema"],
+            }
+            for tool in TOOLS
+        ]
+
+    def run(self, user_id, prompt):
+        tools = self._tools()
+        history = [{"type": "user_input", "content": [{"type": "text", "text": prompt}]}]
+        response = self.client.interactions.create(
+            model=self.model,
+            input=history,
+            store=False,
+            system_instruction=SYSTEM_PROMPT,
+            tools=tools,
+        )
+        tool_calls = []
+        latest_intent_id = None
+
+        for _ in range(8):
+            calls = [step for step in response.steps if step.type == "function_call"]
+            if not calls:
+                intent = self.service.intent_for_user(user_id, latest_intent_id) if latest_intent_id else None
+                approval_url = (f"/approvals/{latest_intent_id}"
+                                if intent and intent["state"] == "HELD_FOR_APPROVAL" else None)
+                return {"answer": response.output_text or "", "tool_calls": tool_calls,
+                        "intent": intent, "approval_url": approval_url}
+
+            results = []
+            history.extend(step.model_dump() for step in response.steps)
+            for call in calls:
+                try:
+                    result = self._run_tool(call.name, call.arguments, user_id)
+                    if call.name == "propose_purchase":
+                        latest_intent_id = result["intent_id"]
+                    tool_calls.append({"name": call.name, "ok": True})
+                except (KeyError, TypeError, ValueError) as exc:
+                    result = {"error": str(exc)}
+                    tool_calls.append({"name": call.name, "ok": False})
+                result_step = {
+                    "type": "function_result",
+                    "name": call.name,
+                    "call_id": call.id,
+                    "result": [{"type": "text", "text": json.dumps(result, default=str)}],
+                }
+                results.append(result_step)
+                history.append(result_step)
+            response = self.client.interactions.create(
+                model=self.model,
+                input=history,
+                store=False,
+                system_instruction=SYSTEM_PROMPT,
+                tools=tools,
+            )
+
+        intent = self.service.intent_for_user(user_id, latest_intent_id) if latest_intent_id else None
+        approval_url = (f"/approvals/{latest_intent_id}"
+                        if intent and intent["state"] == "HELD_FOR_APPROVAL" else None)
+        return {"answer": "I reached the tool-call limit. Review the TrustGate decision before proceeding.",
+                "tool_calls": tool_calls, "intent": intent, "approval_url": approval_url}

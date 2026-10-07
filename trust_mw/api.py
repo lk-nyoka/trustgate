@@ -184,6 +184,7 @@ def _login_page(error_message=None, status_code=200):
     return HTMLResponse(f"""<!doctype html><html lang="en"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="theme-color" content="#f4f5f7">
+<link rel="stylesheet" href="/static/glass/glass.css">
 <title>Sign in · TrustGate</title>
 <style>
 {CSS}
@@ -281,7 +282,7 @@ body{{min-height:100%;background:var(--bg);padding:24px}}
       <p class="story-value">TrustGate governs every AI-proposed purchase before PayPal execution.</p>
     </div>
     <div>
-      <div class="flow-visual">
+      <div class="flow-visual" data-glass="1" data-glass-tint="0.03">
         <div class="flow-caption"><span>Purchase authorization path</span><span class="flow-health"><i></i>Policy active</span></div>
         <div class="flow-route" aria-hidden="true"><span class="flow-packet"></span></div>
         <div class="flow-nodes">
@@ -311,7 +312,7 @@ body{{min-height:100%;background:var(--bg);padding:24px}}
       </div>
     </div>
   </section>
-</main></body></html>""", status_code=status_code)
+</main><script src="/static/glass/glass-init.js" defer></script></body></html>""", status_code=status_code)
 
 
 # ── App factory ───────────────────────────────────────────────────────────────
@@ -532,7 +533,7 @@ def create_app(svc, users, csrf_secret, admin_key=None, cookie_secure=False,
             "adapter": adapter_label(),
             "review_workspace": workspaces is not None,
             "review_agent_key": agent_key_now() if workspaces is not None else None,
-            "assistant_mode": "anthropic" if runner_now() else "scripted",
+            "assistant_mode": runner_now().provider_name.lower() if runner_now() else "scripted",
             "stats": stats,
             "policy": {
                 "policy_id": policy.policy_id,
@@ -817,6 +818,9 @@ def create_app(svc, users, csrf_secret, admin_key=None, cookie_secure=False,
 
     # ── Serve React static build (production) ─────────────────────────────
     import os, pathlib
+    static_dir = pathlib.Path(__file__).parent / "static"
+    if static_dir.exists():
+        app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
     dist = pathlib.Path(__file__).parent.parent / "frontend" / "dist"
     if dist.exists():
         app.mount("/app", StaticFiles(directory=str(dist), html=True), name="react")
@@ -1034,9 +1038,18 @@ def create_app(svc, users, csrf_secret, admin_key=None, cookie_secure=False,
             f'approvals and resets affect only this session.</p>'
         ) if workspaces is not None else ""
         policy_label = f"travel.v{policy.version}" if policy else "—"
+        if drafter.name == "scripted":
+          drafter_mode = "A scripted drafter (no model key configured)"
+          drafter_label = "Scripted draft policy"
+        elif getattr(drafter, "provider_name", "") == "Gemini":
+          drafter_mode = "Gemini AI drafter"
+          drafter_label = "Gemini-generated draft policy"
+        else:
+          drafter_mode = "Claude AI drafter"
+          drafter_label = "AI-generated draft policy"
         authoring_html = (AUTHORING_PANEL
-                          .replace("__MODE__", "The AI assistant" if drafter.name == "ai" else "A scripted drafter (no model key configured)")
-                          .replace("__LABEL__", "AI-generated draft policy" if drafter.name == "ai" else "Scripted draft policy")
+                  .replace("__MODE__", drafter_mode)
+                  .replace("__LABEL__", drafter_label)
                           .replace("__CSRF__", csrf_for(token)))
         blocked = stats.get("blocked", 0)
 
@@ -1129,9 +1142,9 @@ def create_app(svc, users, csrf_secret, admin_key=None, cookie_secure=False,
     <dt>Policy ID</dt><dd><code>{esc(policy.policy_id)}</code></dd>
     <dt>Approved merchant</dt><dd>{esc(ml)}</dd>
     <dt>Allowed category</dt><dd>{esc(cl)}</dd>
-    <dt>Auto-approve up to</dt><dd>${esc(str(policy.auto_approve_up_to))}</dd>
-    <dt>Max single purchase</dt><dd>${esc(str(policy.max_single_purchase))}</dd>
-    <dt>Total budget</dt><dd>${esc(str(policy.max_total_spend))}</dd>
+    <dt>Auto-approve up to</dt><dd>${policy.auto_approve_up_to:,.2f}</dd>
+    <dt>Max single purchase</dt><dd>${policy.max_single_purchase:,.2f}</dd>
+    <dt>Total budget</dt><dd>${policy.max_total_spend:,.2f}</dd>
   </div>
   <div class="sep"></div>
   {kill_form}
@@ -1152,7 +1165,7 @@ Developers give agents one governed purchase tool instead of raw PayPal payment 
     <div class="assistant-head">
       <div><div class="assistant-kicker">AI purchase assistant</div>
         <div class="assistant-subtitle">Search registry products, inspect trusted facts, then send a governed proposal.</div></div>
-      <span class="demo-agent-tag">{'Anthropic tool agent' if runner_now() else 'Scripted demo agent'}</span>
+      <span class="demo-agent-tag">{runner_now().provider_name + ' tool agent' if runner_now() else 'Scripted demo agent'}</span>
     </div>
     <div class="agent-note">{'The model can only search products, inspect registry facts, and submit governed proposals. TrustGate still controls authorization.' if runner_now() else 'This walkthrough uses a scripted agent; no live language model is configured. Every proposal still passes through TrustGate policy.'}</div>
     <div class="agent-thread" id="agent-thread" aria-live="polite">
@@ -1361,8 +1374,8 @@ document.addEventListener('DOMContentLoaded',()=>{{
                          else "var(--fg3)")
             sub = ("governed payment path" if state == "CAPTURED"
                    else "awaiting human approval" if state == "HELD_FOR_APPROVAL"
-                   else "context risk flagged" if state == "BLOCKED"
-                   else state.lower().replace("_", " "))
+                   else (reason_label((v.get("reason_codes") or v.get("reasons") or ["Policy block"])[0]) if state == "BLOCKED"
+                   else state.lower().replace("_", " ")))
 
             sel_cls = " selected" if is_sel else ""
             list_rows += f"""

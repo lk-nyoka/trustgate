@@ -350,7 +350,7 @@ def layout(title, body, active_nav="", paypal_mode="fake", stats=None, extra_hea
     {nav_item("</>", "API surface", "/api-surface", "api")}
   </ul>
   <div class="sb-bottom">
-    <div class="paypal-mode">
+    <div class="paypal-mode" data-glass="1" data-glass-tint="0.03">
       <div class="mode-label">Environment</div>
       <div class="mode-val"><span class="live-dot" style="{'background:var(--ok)' if paypal_mode=='sandbox' else 'background:var(--fg3);animation:none'}"></span>{esc(mode_label)}</div>
       <div class="mode-sub">{esc(mode_sub)}</div>
@@ -369,6 +369,7 @@ def layout(title, body, active_nav="", paypal_mode="fake", stats=None, extra_hea
     return f"""<!doctype html><html lang="en"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{esc(title)} · TrustGate</title>
+<link rel="stylesheet" href="/static/glass/glass.css">
 <style>{CSS}</style>{extra_head}
 </head><body>
 <div class="shell">
@@ -391,4 +392,5 @@ def layout(title, body, active_nav="", paypal_mode="fake", stats=None, extra_hea
     </div>
   </div>
 </div>
+<script src="/static/glass/glass-init.js" defer></script>
 </body></html>"""
