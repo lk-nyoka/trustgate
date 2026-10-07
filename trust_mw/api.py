@@ -1374,8 +1374,8 @@ document.addEventListener('DOMContentLoaded',()=>{{
                          else "var(--fg3)")
             sub = ("governed payment path" if state == "CAPTURED"
                    else "awaiting human approval" if state == "HELD_FOR_APPROVAL"
-                   else "context risk flagged" if state == "BLOCKED"
-                   else state.lower().replace("_", " "))
+                   else (reason_label((v.get("reason_codes") or v.get("reasons") or ["Policy block"])[0]) if state == "BLOCKED"
+                   else state.lower().replace("_", " ")))
 
             sel_cls = " selected" if is_sel else ""
             list_rows += f"""

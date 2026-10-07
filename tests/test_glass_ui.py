@@ -62,3 +62,16 @@ def test_policy_panel_formats_every_amount_with_cents():
     for label, amount in (("Auto-approve up to", "$250.00"), ("Max single purchase", "$500.00"),
                           ("Total budget", "$1,000.00")):
         assert re.search(rf"<dt>{label}</dt><dd>\{amount}</dd>", html), label
+
+
+def test_blocked_rows_show_the_real_reason_not_a_generic_context_label():
+    from trust_mw.ui_shell import reason_label
+    c = client()
+    c.post("/login", data={"username": "demo", "password": "pw"})
+    blocked = [i for i in c.get("/api/intents").json() if i["state"] == "BLOCKED"]
+    assert blocked
+    page = c.get("/intents").text
+    assert "context risk flagged" not in page
+    for i in blocked:
+        code = (i.get("reason_codes") or i.get("reasons"))[0]
+        assert reason_label(code) in page
