@@ -533,7 +533,7 @@ def create_app(svc, users, csrf_secret, admin_key=None, cookie_secure=False,
             "adapter": adapter_label(),
             "review_workspace": workspaces is not None,
             "review_agent_key": agent_key_now() if workspaces is not None else None,
-            "assistant_mode": "anthropic" if runner_now() else "scripted",
+            "assistant_mode": runner_now().provider_name.lower() if runner_now() else "scripted",
             "stats": stats,
             "policy": {
                 "policy_id": policy.policy_id,
@@ -1038,9 +1038,18 @@ def create_app(svc, users, csrf_secret, admin_key=None, cookie_secure=False,
             f'approvals and resets affect only this session.</p>'
         ) if workspaces is not None else ""
         policy_label = f"travel.v{policy.version}" if policy else "—"
+        if drafter.name == "scripted":
+          drafter_mode = "A scripted drafter (no model key configured)"
+          drafter_label = "Scripted draft policy"
+        elif getattr(drafter, "provider_name", "") == "Gemini":
+          drafter_mode = "Gemini AI drafter"
+          drafter_label = "Gemini-generated draft policy"
+        else:
+          drafter_mode = "Claude AI drafter"
+          drafter_label = "AI-generated draft policy"
         authoring_html = (AUTHORING_PANEL
-                          .replace("__MODE__", "The AI assistant" if drafter.name == "ai" else "A scripted drafter (no model key configured)")
-                          .replace("__LABEL__", "AI-generated draft policy" if drafter.name == "ai" else "Scripted draft policy")
+                  .replace("__MODE__", drafter_mode)
+                  .replace("__LABEL__", drafter_label)
                           .replace("__CSRF__", csrf_for(token)))
         blocked = stats.get("blocked", 0)
 
@@ -1156,7 +1165,7 @@ Developers give agents one governed purchase tool instead of raw PayPal payment 
     <div class="assistant-head">
       <div><div class="assistant-kicker">AI purchase assistant</div>
         <div class="assistant-subtitle">Search registry products, inspect trusted facts, then send a governed proposal.</div></div>
-      <span class="demo-agent-tag">{'Anthropic tool agent' if runner_now() else 'Scripted demo agent'}</span>
+      <span class="demo-agent-tag">{runner_now().provider_name + ' tool agent' if runner_now() else 'Scripted demo agent'}</span>
     </div>
     <div class="agent-note">{'The model can only search products, inspect registry facts, and submit governed proposals. TrustGate still controls authorization.' if runner_now() else 'This walkthrough uses a scripted agent; no live language model is configured. Every proposal still passes through TrustGate policy.'}</div>
     <div class="agent-thread" id="agent-thread" aria-live="polite">

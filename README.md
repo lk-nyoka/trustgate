@@ -83,9 +83,9 @@ Avoid running `live_check.py` just to open the frontend; it creates real PayPal 
 
 TrustGate is a developer control plane for agentic payments.
 
-The live console uses a **scripted demo agent** when no model key is configured. Set `ANTHROPIC_API_KEY` in `.env` to enable live Anthropic tool calling. Both modes expose only `search_products`, `get_product_details`, and `propose_purchase`; only product references are submitted, while trusted price and payee details are resolved server-side. The model cannot approve, capture, or call PayPal directly.
+The live console uses a **scripted demo agent** when no model key is configured. Set `GEMINI_API_KEY` in `.env` to enable live Gemini tool calling; Gemini takes priority if both providers are configured. Alternatively, set `ANTHROPIC_API_KEY` for Claude. Both live modes expose only `search_products`, `get_product_details`, and `propose_purchase`; only product references are submitted, while trusted price and payee details are resolved server-side. The model cannot approve, capture, or call PayPal directly.
 
-To enable the live model, copy `.env.example` to `.env`, set `ANTHROPIC_API_KEY`, and restart Uvicorn. Optionally set `ANTHROPIC_MODEL`; the default is `claude-sonnet-5-5`. The startup banner reports whether the active mode is Anthropic or scripted.
+To enable the live model locally, copy `.env.example` to `.env`, set `GEMINI_API_KEY`, and restart Uvicorn. Optionally set `GEMINI_MODEL`; the default is `gemini-3.8-flash`. On Render, add a fresh key as a secret environment variable named `GEMINI_API_KEY`; never commit it or paste it into chat. The startup banner and console identify the active provider. If no key is configured, the app clearly labels its scripted fallback.
 
 When an AI agent proposes a purchase:
 

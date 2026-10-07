@@ -15,7 +15,7 @@ from .api import create_app
 from .demo_data import DictPages, make_policy
 from .registry import demo_registry
 from .service import AuthStore, TrustService
-from .policy_author import LLMDrafter
+from .policy_author import GeminiPolicyDrafter, LLMDrafter
 from .workspaces import seed_demo_intents
 
 
@@ -31,28 +31,47 @@ def build():
     admin_key = os.getenv("ADMIN_KEY") or None
     cookie_secure = os.getenv("COOKIE_SECURE") == "1"
 
-    anthropic_client = None
-    if os.getenv("ANTHROPIC_API_KEY"):
+    model_client = None
+    provider = "scripted"
+    gemini_key = os.getenv("GEMINI_API_KEY")
+    anthropic_key = os.getenv("ANTHROPIC_API_KEY")
+    if gemini_key:
+        try:
+            from google import genai
+            model_client = genai.Client(api_key=gemini_key)
+            provider = "gemini"
+        except ImportError:
+            print("[assistant] Install google-genai to enable Gemini; using scripted fallback.")
+    elif anthropic_key:
         try:
             from anthropic import Anthropic
-            anthropic_client = Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
+            model_client = Anthropic(api_key=anthropic_key)
+            provider = "anthropic"
         except ImportError:
-            print("[assistant] Install requirements to enable the Anthropic assistant.")
-    model = os.getenv("ANTHROPIC_MODEL", "claude-sonnet-5-5")
+            print("[assistant] Install anthropic to enable Claude; using scripted fallback.")
+    default_model = "gemini-3.8-flash" if provider == "gemini" else "claude-sonnet-5-5"
+    model = os.getenv("GEMINI_MODEL" if provider == "gemini" else "ANTHROPIC_MODEL", default_model)
 
     def make_runner(svc, agent_key):
-        if anthropic_client is None:
+        if model_client is None:
             return None
-        from .assistant import AssistantRunner
-        return AssistantRunner(anthropic_client, svc, agent_key, model)
+        from .assistant import AssistantRunner, GeminiAssistantRunner
+        runner_type = GeminiAssistantRunner if provider == "gemini" else AssistantRunner
+        return runner_type(model_client, svc, agent_key, model)
+
+    def make_policy_drafter():
+        if model_client is None:
+            return None
+        drafter_type = GeminiPolicyDrafter if provider == "gemini" else LLMDrafter
+        return drafter_type(model_client, model)
 
     if mode != "sandbox":
         # Hosted / review mode: every login gets its own isolated workspace with fake payments.
         # This path never loads PayPal credentials.
         from .workspaces import DemoWorkspaces, make_review_workspace_factory
         workspaces = DemoWorkspaces(make_review_workspace_factory(
-            make_runner if anthropic_client else None))
-        drafter = LLMDrafter(anthropic_client, model) if anthropic_client else None
+            make_runner if model_client else None))
+        drafter = make_policy_drafter()
         app = create_app(
             None,
             {"demo": ("user_1", password)},
@@ -67,7 +86,7 @@ def build():
         print(f"\n{'='*56}")
         print("  TrustGate REVIEW DEMO (per-session workspaces)")
         print("  Payments : SIMULATED (fake adapter, no PayPal calls)")
-        print(f"  Assistant: {'Anthropic' if anthropic_client else 'scripted demo'}")
+        print(f"  Assistant: {'Gemini' if provider == 'gemini' else 'Claude' if provider == 'anthropic' else 'scripted demo'}")
         print(f"  Login    : demo / {password}  (each login = fresh workspace)")
         print("  URL      : http://localhost:8000")
         print(f"{'='*56}\n")
@@ -93,11 +112,11 @@ def build():
         paypal_mode="sandbox",
         demo_agent_key=agent_key,
         assistant_runner=assistant_runner,
-        policy_drafter=LLMDrafter(anthropic_client, model) if anthropic_client else None,
+        policy_drafter=make_policy_drafter(),
     )
     print(f"\n{'='*56}")
     print("  TrustGate (local) - PayPal Sandbox")
-    print(f"  Assistant: {'Anthropic' if assistant_runner else 'scripted demo'}")
+    print(f"  Assistant: {'Gemini' if provider == 'gemini' else 'Claude' if provider == 'anthropic' else 'scripted demo'}")
     print(f"  Login    : demo / {password}")
     print(f"  API key  : {agent_key}")
     if admin_key:

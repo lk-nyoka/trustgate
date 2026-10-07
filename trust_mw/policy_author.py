@@ -142,6 +142,7 @@ class ScriptedDrafter:
 class LLMDrafter:
     """Asks a model to call one tool, `submit_policy_draft`. Its output is only a proposal."""
     name = "ai"
+    provider_name = "Claude"
 
     def __init__(self, client, model):
         self.client, self.model = client, model
@@ -172,4 +173,112 @@ class LLMDrafter:
         for block in resp.content:
             if getattr(block, "type", None) == "tool_use" and block.name == "submit_policy_draft":
                 return dict(block.input)
+        raise DraftError("the model did not return a draft")
+
+
+class GeminiPolicyDrafter(LLMDrafter):
+    """Gemini Interactions adapter; deterministic server validation remains authoritative."""
+    name = "gemini"
+    provider_name = "Gemini"
+
+    def _tool(self, registry):
+        def enum_list(values):
+            return {"type": "array", "items": {"type": "string", "enum": sorted(values)}}
+
+        fields = {
+            "merchant_allowlist": enum_list(registry.merchant_ids()),
+            "category_allowlist": enum_list(registry.categories()),
+            "currency_allowlist": enum_list(registry.currencies()),
+            "max_single_purchase": {"type": "number"},
+            "auto_approve_up_to": {"type": "number"},
+            "max_total_spend": {"type": "number"},
+            "context_actions": {
+                "type": "object",
+                "properties": {
+                    flag: {"type": "string", "enum": list(CONTEXT_ACTIONS)}
+                    for flag in CONTEXT_FLAGS
+                },
+            },
+        }
+        return {
+            "type": "function",
+            "name": "submit_policy_draft",
+            "description": (
+                "Submit a partial DRAFT spending policy based only on the user's request. "
+                "A human reviews and activates it; never set status or activation fields."
+            ),
+            "parameters": {"type": "object", "properties": fields},
+        }
+
+    def draft(self, text, registry):
+        response = self.client.interactions.create(
+            model=self.model,
+            input=text,
+            store=False,
+            system_instruction=(
+                "Translate the user's spending wishes into a partial draft policy by calling "
+                "submit_policy_draft. Include only specified fields. Never invent registry "
+                "values or loosen hard blocks. The server validates the draft and a human "
+                "must activate it."
+            ),
+            tools=[self._tool(registry)],
+            generation_config={"tool_choice": "any"},
+        )
+        for step in response.steps:
+            if step.type == "function_call" and step.name == "submit_policy_draft":
+                return dict(step.arguments)
+        raise DraftError("the model did not return a draft")
+
+
+class GeminiPolicyDrafter(LLMDrafter):
+    """Gemini Interactions adapter; strict server validation remains authoritative."""
+    name = "gemini"
+    provider_name = "Gemini"
+
+    def _tool(self, registry):
+        def enum_list(values):
+            return {"type": "array", "items": {"type": "string", "enum": sorted(values)}}
+
+        fields = {
+            "merchant_allowlist": enum_list(registry.merchant_ids()),
+            "category_allowlist": enum_list(registry.categories()),
+            "currency_allowlist": enum_list(registry.currencies()),
+            "max_single_purchase": {"type": "number"},
+            "auto_approve_up_to": {"type": "number"},
+            "max_total_spend": {"type": "number"},
+            "context_actions": {
+                "type": "object",
+                "properties": {
+                    flag: {"type": "string", "enum": list(CONTEXT_ACTIONS)}
+                    for flag in CONTEXT_FLAGS
+                },
+            },
+        }
+        return {
+            "type": "function",
+            "name": "submit_policy_draft",
+            "description": (
+                "Submit a partial DRAFT spending policy based only on the user's request. "
+                "A human reviews and activates it; never set status or activation fields."
+            ),
+            "parameters": {"type": "object", "properties": fields},
+        }
+
+    def draft(self, text, registry):
+        response = self.client.interactions.create(
+            model=self.model,
+            input=text,
+            store=False,
+            system_instruction=(
+                "Translate the user's spending wishes into a partial draft policy by calling "
+                "submit_policy_draft. Include only specified fields. Never invent registry "
+                "values or loosen hard blocks. The server validates the draft and a human "
+                "must activate it."
+            ),
+            tools=[self._tool(registry)],
+            generation_config={"tool_choice": "any"},
+        )
+        for step in response.steps:
+            if step.type == "function_call" and step.name == "submit_policy_draft":
+                return dict(step.arguments)
         raise DraftError("the model did not return a draft")
