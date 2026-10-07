@@ -4,7 +4,7 @@ services:
     runtime: python
     plan: free
     buildCommand: pip install -r requirements.txt
-    startCommand: uvicorn trust_mw.demo_app:app --host 0.0.0.0 --port $PORT
+    startCommand: uvicorn trust_mw.demo_app:app --no-proxy-headers --host 0.0.0.0 --port $PORT
     healthCheckPath: /healthz
     envVars:
       - key: TRUSTED_PROXY_HOPS
