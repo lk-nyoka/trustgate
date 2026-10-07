@@ -10,6 +10,20 @@ TrustGate is a deterministic authorization middleware that sits between an AI ag
 
 ---
 
+## In 30 seconds
+
+TrustGate lets an AI agent *propose* a purchase without giving it payment authority.
+
+| Agent proposal | TrustGate decision | PayPal |
+|---|---|---|
+| $180 flight | `ALLOW` | Order created and captured (Sandbox) |
+| $320 flexible flight | `APPROVAL_REQUIRED` | No order until an authenticated human approves |
+| $3 "activation fee" injected via page content | `BLOCK` | Never reached; no order created |
+
+The AI proposes. TrustGate enforces. PayPal executes. Every step is written to a hash-chained audit log, and a kill switch pauses all future authorization.
+
+---
+
 ## Quick start
 
 Requires **Python 3.12+**. From `trust-middleware/`:
@@ -131,6 +145,20 @@ Audit Log                    ← SHA-256 hash-chained, append-only
 | `POST` | `/api/login` | — | JSON login |
 | `GET` | `/api/me` | Session | Current user + stats + policy |
 | `GET` | `/api/intents` | Session | All intents for this user |
+
+---
+
+## Why PayPal is central
+
+TrustGate's execution boundary is built around the PayPal Orders flow, not a generic "approved" flag:
+
+1. TrustGate evaluates the agent's purchase intent against server-resolved facts and policy.
+2. A PayPal order is created only after the intent is allowed, or after a human approves a held intent.
+3. Payment uses the PayPal Sandbox path (vaulted payment token; the order's `custom_id` binds it to the internal intent and configured payee).
+4. After capture, TrustGate reads the order back and verifies status, amount, currency and the intent reference before it records success.
+5. Held and blocked requests create no PayPal order, which the UI states explicitly ("Not created" / "Not reached").
+
+The hosted review site swaps in a simulated adapter so anyone can replay the flow safely; the real PayPal evidence comes from the local Sandbox run (`live_check.py`). TrustGate is a production-shaped prototype of the authorization control plane, not production payment infrastructure.
 
 ---
 
