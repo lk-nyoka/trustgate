@@ -1,0 +1,35 @@
+services:
+  - type: web
+    name: trustgate
+    runtime: docker
+    healthCheckPath: /healthz
+    autoDeploy: true
+    envVars:
+      - key: APP_ENV
+        value: production
+      - key: PAYPAL_MODE
+        value: fake            # set to "sandbox" once PAYPAL_* vars below are filled
+      - key: AGENT_API_KEY
+        generateValue: true    # >=24 chars
+      - key: DEMO_PASSWORD
+        sync: false            # set in dashboard (>=12 chars)
+      - key: ADMIN_KEY
+        generateValue: true
+      - key: CSRF_SECRET
+        generateValue: true
+      - key: PAYPAL_CLIENT_ID
+        sync: false
+      - key: PAYPAL_CLIENT_SECRET
+        sync: false
+      - key: PAYPAL_VAULT_ID
+        sync: false            # vault_id from .vault_token.json (sandbox mode only)
+      - key: LLM_BASE_URL
+        sync: false            # optional: enables AI policy drafting on /try
+      - key: LLM_API_KEY
+        sync: false
+      - key: LLM_MODEL
+        sync: false
+      - key: REPO_URL
+        sync: false
+      - key: AUDIT_PATH
+        value: /data/audit.jsonl

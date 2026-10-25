@@ -1,0 +1,7 @@
+.git
+.env
+.vault_token.json
+tests
+__pycache__
+.pytest_cache
+.venv
