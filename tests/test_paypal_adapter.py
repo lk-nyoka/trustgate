@@ -6,7 +6,7 @@ PayPal's behaviour; that is what live_check.py is for.
 import pytest
 
 from tests.conftest import Env
-from trust_mw.paypal_adapter import PayPalAdapter, PaymentError
+from trustgate.paypal_adapter import PayPalAdapter, PaymentError
 
 SPEC = {"intent": "CAPTURE", "payee_id": "paypal_sandbox_demo_airlines", "amount": "180.00",
         "currency": "USD", "reference_id": "pi_test1"}

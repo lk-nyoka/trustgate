@@ -1,8 +1,8 @@
 """Capacity safety: active sessions are never evicted; spoofed X-Forwarded-For can't dodge limits."""
 from fastapi.testclient import TestClient
 
-from trust_mw.api import create_app
-from trust_mw.workspaces import DemoBusy, DemoWorkspaces, client_ip, make_review_workspace_factory
+from trustgate.api import create_app
+from trustgate.workspaces import DemoBusy, DemoWorkspaces, client_ip, make_review_workspace_factory
 
 PROTECT = 30 * 60
 

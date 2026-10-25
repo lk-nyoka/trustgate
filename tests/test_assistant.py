@@ -3,8 +3,8 @@ from types import SimpleNamespace
 from fastapi.testclient import TestClient
 
 from tests.conftest import Env
-from trust_mw.api import create_app
-from trust_mw.assistant import AssistantRunner, GeminiAssistantRunner, TOOLS
+from trustgate.api import create_app
+from trustgate.assistant import AssistantRunner, GeminiAssistantRunner, TOOLS
 
 
 def block(kind, **values):

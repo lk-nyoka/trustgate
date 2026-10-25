@@ -2,11 +2,11 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from trust_mw.fake_paypal import FakePayPal
-from trust_mw.registry import demo_registry
-from trust_mw.service import AuthStore, TrustService
+from trustgate.fake_paypal import FakePayPal
+from trustgate.registry import demo_registry
+from trustgate.service import AuthStore, TrustService
 
-from trust_mw.demo_data import (ATTACK_FEE, ATTACK_UPGRADE, BENIGN, PAGES, DictPages,  # noqa: F401
+from trustgate.demo_data import (ATTACK_FEE, ATTACK_UPGRADE, BENIGN, PAGES, DictPages,  # noqa: F401
                                 make_policy)
 
 

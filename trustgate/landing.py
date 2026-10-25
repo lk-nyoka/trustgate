@@ -33,11 +33,11 @@ footer{color:var(--mut);font-size:14px;padding:30px 0 50px}
 @media(max-width:820px){.hero{grid-template-columns:1fr}.cards,.stats{grid-template-columns:1fr}}
 @media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}*{transition:none!important}}
 </style></head><body><canvas id="bg"></canvas><div class="wrap">
-<header class="nav"><b>TrustGate</b><nav><a href="#how">How it works</a><a href="#proof">Proof</a><a class="btn" href="/login">Launch demo</a></nav></header>
+<header class="nav"><b>TrustGate</b><nav><a href="/how">How it works</a><a href="#proof">Proof</a><a href="/login">Console</a><a class="btn" href="/try">Try it live</a></nav></header>
 <section class="hero"><div><p class="eyebrow">Trust infrastructure for autonomous commerce</p>
 <h1>AI may recommend.<br><span>Only policy may authorize.</span></h1>
 <p class="lead">TrustGate is trust middleware between your AI agent and PayPal. Deterministic policy decides whether a payment is ever attempted, a human approves the exceptions, and every decision leaves evidence.</p>
-<div class="cta"><a class="btn primary" href="/login">Launch live demo</a><a class="btn" href="#how">See how it works</a></div></div>
+<div class="cta"><a class="btn primary" href="/try">Try it live</a><a class="btn" href="/how">How it works</a><a class="btn" href="/login">Console</a></div></div>
 <div class="panel" id="panel"><canvas id="flow" width="640" height="340"></canvas><div class="cap"><span id="cl"></span><b id="co"></b></div></div></section>
 <section id="proof"><h2>Live from this server</h2><div class="stats">
 <div><b>{{captured}}</b><span>payments captured</span></div><div><b>{{awaiting}}</b><span>awaiting a human</span></div><div><b>{{blocked}}</b><span>blocked before PayPal</span></div></div>

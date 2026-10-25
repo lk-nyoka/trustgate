@@ -1,8 +1,8 @@
 import pytest
 
 from tests.conftest import Env, make_policy
-from trust_mw.fake_paypal import FakePayPal
-from trust_mw.service import ApprovalError, AuthError
+from trustgate.fake_paypal import FakePayPal
+from trustgate.service import ApprovalError, AuthError
 
 
 def test_human_approval_executes_exactly_once(env):

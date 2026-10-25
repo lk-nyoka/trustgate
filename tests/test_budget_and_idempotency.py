@@ -11,7 +11,7 @@ import pytest
 
 from tests.conftest import Env, make_policy
 from tests.test_api import AGENT, make, propose
-from trust_mw.service import ApprovalError, IdempotencyConflict
+from trustgate.service import ApprovalError, IdempotencyConflict
 
 FLEX = "cpt-jnb-flex-320"
 URL = "https://demo-airlines.test/checkout"

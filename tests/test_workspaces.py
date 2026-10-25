@@ -2,8 +2,8 @@
 import pytest
 from fastapi.testclient import TestClient
 
-from trust_mw.api import create_app
-from trust_mw.workspaces import DemoWorkspaces, RateLimited, make_review_workspace_factory
+from trustgate.api import create_app
+from trustgate.workspaces import DemoWorkspaces, RateLimited, make_review_workspace_factory
 
 
 def make_app(**kw):

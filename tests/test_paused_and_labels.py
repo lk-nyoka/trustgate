@@ -6,8 +6,8 @@ from fastapi.testclient import TestClient
 
 from tests.conftest import Env
 from tests.test_api import AGENT, approve, login, make, propose
-from trust_mw.api import create_app
-from trust_mw.service import ApprovalError
+from trustgate.api import create_app
+from trustgate.service import ApprovalError
 
 
 def csrf_in(page, action):

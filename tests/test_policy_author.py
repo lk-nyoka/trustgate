@@ -8,10 +8,10 @@ from fastapi.testclient import TestClient
 from tests.conftest import PAGES, Env
 from tests.test_api import AGENT, approve, login, make, propose
 from tests.test_workspaces import Judge, make_app
-from trust_mw.api import create_app
-from trust_mw.policy_author import (CONTEXT_FLAGS, DraftError, GeminiPolicyDrafter, LLMDrafter,
+from trustgate.api import create_app
+from trustgate.policy_author import (CONTEXT_FLAGS, DraftError, GeminiPolicyDrafter, LLMDrafter,
                                     ScriptedDrafter, apply_draft, validate_draft)
-from trust_mw.registry import demo_registry
+from trustgate.registry import demo_registry
 
 TEXT = ("Let the agent book flights from approved airlines under $500. "
         "Ask me before spending more than $250. Never pay unrelated activation fees.")

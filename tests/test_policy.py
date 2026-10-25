@@ -4,8 +4,8 @@ from decimal import Decimal
 import pytest
 
 from tests.conftest import Env, make_policy
-from trust_mw.policy import SEVERITY, TrustedFacts, evaluate
-from trust_mw.scanner import ContextFlag
+from trustgate.policy import SEVERITY, TrustedFacts, evaluate
+from trustgate.scanner import ContextFlag
 
 
 def test_allow_below_auto_approve_executes_payment(env):

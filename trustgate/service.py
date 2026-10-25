@@ -5,6 +5,7 @@ policy confirmation and revocation need a human session token. The agent never
 supplies prices, payees, categories, user ids or approvals.
 """
 import hashlib
+import os
 import json
 import threading
 import uuid
@@ -77,16 +78,30 @@ class AuthStore:
 class AuditLog:
     """Append-only, hash-chained so tampering is detectable."""
 
-    def __init__(self, clock):
+    def __init__(self, clock, path=None):
+        """path: optional JSONL file. Events are appended as they happen and reloaded (and the
+        chain re-verified) on startup, so history survives a restart."""
         self._clock = clock
         self.events = []
+        self._path = path
+        if path and os.path.exists(path):
+            with open(path, encoding="utf-8") as fh:
+                self.events = [json.loads(line) for line in fh if line.strip()]
+            if not self.verify():
+                raise RuntimeError(f"audit file {path} failed hash-chain verification; refusing to start")
 
     def append(self, intent_id, event, data):
         prev = self.events[-1]["hash"] if self.events else "0" * 64
         body = {"seq": len(self.events), "ts": self._clock().isoformat(), "intent_id": intent_id,
                 "event": event, "data": data, "prev": prev}
         digest = hashlib.sha256(json.dumps(body, sort_keys=True, default=str).encode()).hexdigest()
-        self.events.append({**body, "hash": digest})
+        row = {**body, "hash": digest}
+        if self._path:  # write first: an event that cannot be persisted must not be acted on silently
+            with open(self._path, "a", encoding="utf-8") as fh:
+                fh.write(json.dumps(row, sort_keys=True, default=str) + "\n")
+                fh.flush()
+                os.fsync(fh.fileno())
+        self.events.append(row)
 
     def for_intent(self, intent_id):
         return [e for e in self.events if e["intent_id"] == intent_id]
@@ -103,14 +118,14 @@ class AuditLog:
 
 
 class TrustService:
-    def __init__(self, registry, policies, auth, payments, pages=None, clock=None):
+    def __init__(self, registry, policies, auth, payments, pages=None, clock=None, audit_path=None):
         self.registry = registry
         self.policies = dict(policies)
         self.auth = auth
         self.payments = payments
         self.pages = pages
         self.clock = clock or (lambda: datetime.now(timezone.utc))
-        self.audit = AuditLog(self.clock)
+        self.audit = AuditLog(self.clock, audit_path)
         self._intents = {}
         self._by_request = {}  # idempotency key -> (intent_id, canonical request hash)
         self._lock = threading.RLock()  # serialises propose/approve/decline/policy changes

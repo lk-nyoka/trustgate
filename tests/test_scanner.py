@@ -1,5 +1,5 @@
 from tests.conftest import ATTACK_FEE, ATTACK_UPGRADE, BENIGN, Env
-from trust_mw.scanner import scan_page
+from trustgate.scanner import scan_page
 
 
 def test_detects_hidden_json_ld_and_offscreen_css():

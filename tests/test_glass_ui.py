@@ -4,8 +4,8 @@ import re
 
 from fastapi.testclient import TestClient
 
-from trust_mw.api import create_app
-from trust_mw.workspaces import DemoWorkspaces, make_review_workspace_factory
+from trustgate.api import create_app
+from trustgate.workspaces import DemoWorkspaces, make_review_workspace_factory
 
 
 def client():
@@ -65,7 +65,7 @@ def test_policy_panel_formats_every_amount_with_cents():
 
 
 def test_blocked_rows_show_the_real_reason_not_a_generic_context_label():
-    from trust_mw.ui_shell import reason_label
+    from trustgate.ui_shell import reason_label
     c = client()
     c.post("/login", data={"username": "demo", "password": "pw"})
     blocked = [i for i in c.get("/api/intents").json() if i["state"] == "BLOCKED"]

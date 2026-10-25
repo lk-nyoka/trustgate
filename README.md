@@ -1,18 +1,14 @@
 # TrustGate
 
-**Trust infrastructure for autonomous commerce.**
+**AI may recommend. Only policy may authorize.**
 
-> AI may recommend. Only policy may authorize.
+TrustGate is a deterministic authorization layer between an AI agent and PayPal. The agent can only *propose* a
+purchase. TrustGate resolves the real price and payee from its own registry, checks your spending policy with
+plain code, asks a human to approve exceptions, and only then lets the PayPal adapter create the order. Every
+decision goes into a hash-chained audit log. Built for the *Build What's Next with PayPal and AI* hackathon.
 
-TrustGate is a deterministic authorization middleware that sits between an AI agent and PayPal. The agent can only propose purchases; the middleware resolves trusted facts, evaluates policy, optionally requests human approval, and only then allows the PayPal adapter to proceed.
-
+[![CI](https://github.com/lk-nyoka/trustgate/actions/workflows/ci.yml/badge.svg)](https://github.com/lk-nyoka/trustgate/actions)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-
----
-
-## In 30 seconds
-
-TrustGate lets an AI agent *propose* a purchase without giving it payment authority.
 
 | Agent proposal | TrustGate decision | PayPal |
 |---|---|---|
@@ -20,25 +16,56 @@ TrustGate lets an AI agent *propose* a purchase without giving it payment author
 | $320 flexible flight | `APPROVAL_REQUIRED` | No order until an authenticated human approves |
 | $3 "activation fee" injected via page content | `BLOCK` | Never reached; no order created |
 
-The AI proposes. TrustGate enforces. PayPal executes. Every step is written to a hash-chained audit log, and a kill switch pauses all future authorization.
+## For judges: try it in 30 seconds
 
----
+| What | Where |
+|---|---|
+| Interactive demo, no sign-in | `/try` on the hosted URL |
+| Why, how, evidence, limits | `/how` |
+| Human console (queue, approvals, audit) | `/login` (credentials in the Devpost testing instructions) |
+| Run it yourself, no PayPal account needed | See Quick start below (offline mode, PayPal simulated) |
+
+## Hackathon requirements, where each is met
+
+| Requirement | Where |
+|---|---|
+| PayPal developer platform (Sandbox) is central | Orders v2 create/capture with a vaulted payment token, `PayPal-Request-Id` idempotency, and read-back verification of every order and capture: `trustgate/paypal_adapter.py`, `live_check.py`, `spikes/` |
+| Meaningful AI use | (1) plain-English spending rules drafted by a model, validated by code against the registry and hard limits, activated by a human: `trustgate/policy_author.py`; (2) a shopping assistant that searches the registry and proposes purchases with no credentials: `trustgate/assistant.py`. The model is never in the authorization path |
+| Working demo | Hosted `/try` and `/console`, or run locally. Not a mockup |
+| Public repo, detectable license | MIT, `LICENSE` at the repo root |
+| Built during the submission period | Started in October 2026 (first Sandbox check ran 6 Oct) |
+| Demo video under 3 minutes, on YouTube | Linked on the Devpost page |
+| Test access | `/try` needs none. Console credentials are in the Devpost testing instructions. Offline mode needs none |
+
+**AI tools and models used.** Gemini (Google AI Studio free tier, `GEMINI_API_KEY`) or Claude (`ANTHROPIC_API_KEY`)
+power the policy drafter and the shopping assistant; with no key the app runs scripted stand-ins and says so on screen.
+The project was built with Claude (Anthropic) as a coding assistant. Hosted on Render.
 
 ## Quick start
 
-Requires **Python 3.12+**. From `trust-middleware/`:
+Requires **Python 3.12+**.
 
 ```bash
 python -m venv .venv
 # Windows: .\.venv\Scripts\Activate.ps1      macOS/Linux: source .venv/bin/activate
-python -m pip install -r requirements.txt
-python -m pytest -q            # expect: 197 passed
-python -m uvicorn trust_mw.demo_app:app --reload
+python -m pip install -r requirements-dev.txt
+python -m pytest -q            # expect: 215 passed
+python -m uvicorn trustgate.demo_app:app --reload
 ```
 
-Open <http://127.0.0.1:8000/login>. The demo username is `demo`; the password is printed in the startup banner (or set `DEMO_PASSWORD`). If PowerShell blocks activation, call `.\.venv\Scripts\python.exe -m ...` directly.
+Open <http://127.0.0.1:8000/> (landing), `/try` (interactive demo), `/how` (explainer) or `/login` (console). The
+console username is `demo`; the password is printed in the startup banner (or set `DEMO_PASSWORD`). Copy
+`.env.example` to `.env` for PayPal Sandbox mode and optional AI keys. Production settings (`APP_ENV=production`)
+refuse to start without real secrets; see `.env.example` and `render.yaml`.
 
-The app uses fictional merchants and simulated or Sandbox payments only; never enter real credentials or payment data. Do not run `live_check.py` just to open the UI: it creates real PayPal Sandbox payments.
+## What is verified, and what is not
+
+Verified: 215 automated tests (policy, approval separation, idempotency, budget reservation, payment verification,
+HTTP layer, UI, security headers, the public playground); a live Sandbox check on 6 Oct 2026 that completed a $180
+payment (allowed) and a $320 payment (after human approval), re-read both from PayPal, and confirmed no PayPal
+order exists for the held and blocked requests. The AI paths have been tested with scripted and stub models, not
+measured against a hosted model, and we make no detection-rate claim. The page scanner is a heuristic; the policy,
+not the scanner, is the guarantee. Merchants are fictional, state is in memory, and there are no PayPal webhooks.
 
 ---
 
@@ -203,7 +230,7 @@ python -m pytest -q
 
 ### Application and frontend verification
 
-- **197 tests passed** with `python -m pytest -q`
+- **215 tests passed** with `python -m pytest -q`
 - React production build succeeds with `npm run build` from `frontend/`
 - Desktop and mobile layouts checked; reduced-motion behavior is supported
 - Sign-in journey covers empty, invalid, valid, refresh, logout, back-cache protection, and eight-hour expiry
@@ -228,7 +255,7 @@ python -m pytest -q
 
 ## Which UI should judges use?
 
-The **server-rendered console** (`/console`, served by `trust_mw/api.py`) is the authoritative interface and the one deployed on Render. The hosted review experience uses the server-rendered console. The React app in `frontend/` is optional/experimental and is not required for the judge walkthrough; it is an optional client for the same JSON API (`npm install && npm run build`, then open `/app`); it is not part of the hosted deployment path.
+The **server-rendered console** (`/console`, served by `trustgate/api.py`) is the authoritative interface and the one deployed on Render. The hosted review experience uses the server-rendered console. The React app in `frontend/` is optional/experimental and is not required for the judge walkthrough; it is an optional client for the same JSON API (`npm install && npm run build`, then open `/app`); it is not part of the hosted deployment path.
 
 ## Review demo vs. PayPal Sandbox
 
@@ -255,7 +282,7 @@ Review login: username `demo`; the password is given in the project's Devpost su
 
 ## UI glass effect
 
-The login flow panel and the sidebar environment box use [liquid-glass-js](https://github.com/dashersw/liquid-glass-js) (MIT, with html2canvas, vendored in `trust_mw/static/glass/`, licences included). It is decorative progressive enhancement: it is skipped for reduced-motion or reduced-transparency users, narrow screens, no WebGL, or `?glass=off`, and on failure the plain CSS look remains. Forms, approval, audit and payment controls are never wrapped, and labels stay real DOM text.
+The login flow panel and the sidebar environment box use [liquid-glass-js](https://github.com/dashersw/liquid-glass-js) (MIT, with html2canvas, vendored in `trustgate/static/glass/`, licences included). It is decorative progressive enhancement: it is skipped for reduced-motion or reduced-transparency users, narrow screens, no WebGL, or `?glass=off`, and on failure the plain CSS look remains. Forms, approval, audit and payment controls are never wrapped, and labels stay real DOM text.
 
 ## Known limitations
 

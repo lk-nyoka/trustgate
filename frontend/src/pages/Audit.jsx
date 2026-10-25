@@ -146,7 +146,7 @@ export default function AuditPage() {
                 const actor =
                   e.event === 'INTENT_RECEIVED' ? 'shopping-agent / scoped key' :
                   e.event === 'FACTS_RESOLVED' ? 'registry / product + merchant' :
-                  e.event === 'PAYMENT_CAPTURED' || e.event === 'PAYMENT_FAILED' ? 'trust-middleware+' :
+                  e.event === 'PAYMENT_CAPTURED' || e.event === 'PAYMENT_FAILED' ? 'TrustGate+' :
                   'policy-engine / travel.v1'
                 const stateChip =
                   PAYMENT_EVENTS.has(e.event) && e.event.includes('CAPTURED') ? 'CAPTURED' :

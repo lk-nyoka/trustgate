@@ -17,7 +17,7 @@ from typing import Optional
 from fastapi import FastAPI, Request
 from fastapi.encoders import jsonable_encoder
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field, StrictInt
 
@@ -319,7 +319,7 @@ body{{min-height:100%;background:var(--bg);padding:24px}}
 
 def create_app(svc, users, csrf_secret, admin_key=None, cookie_secure=False,
                paypal_mode="fake", demo_agent_key=None, assistant_runner=None, workspaces=None,
-               policy_drafter=None, trusted_proxy_hops=0):
+               policy_drafter=None, trusted_proxy_hops=0, hardening=None, playground=None, repo_url=None):
     """users: {username: (user_id, password)}.
 
     workspaces: optional DemoWorkspaces. When given (hosted review mode) every login gets its own
@@ -327,6 +327,9 @@ def create_app(svc, users, csrf_secret, admin_key=None, cookie_secure=False,
     app = FastAPI(title="TrustGate", docs_url=None, redoc_url=None)
     base_agent_key, base_runner = demo_agent_key, assistant_runner
     drafter = policy_drafter or ScriptedDrafter()
+    if hardening is not None:  # rate limits, security headers, request logs (see hardening.py)
+        from .hardening import Hardening
+        app.add_middleware(Hardening, **hardening)
     current_ws = contextvars.ContextVar("trustgate_workspace", default=None)
 
     class _Live:
@@ -479,6 +482,25 @@ def create_app(svc, users, csrf_secret, admin_key=None, cookie_secure=False,
             end_session(token)
             resp.delete_cookie(COOKIE)
         return resp
+
+    @app.get("/readyz")
+    def readyz():
+        ok = True if workspaces is not None else svc.audit.verify()
+        return JSONResponse({"ok": ok, "audit_chain_valid": ok}, status_code=200 if ok else 503)
+
+    @app.get("/how", response_class=HTMLResponse)
+    def how():
+        from .how_page import how_page
+        return how_page(repo_url)
+
+    if playground is not None:  # public, sign-in-free interactive demo (isolated per visitor)
+        from . import playground as _pg
+        from .playground_ui import page_html
+        _pg.register(app, playground, PurchaseIntentIn, cookie_secure, page_html)
+
+    @app.get("/favicon.ico")
+    def favicon():
+        return Response(status_code=204)
 
     @app.get("/healthz")
     def healthz():
@@ -1806,9 +1828,9 @@ document.addEventListener('DOMContentLoaded',()=>{{
             # source / actor
             actor = ("shopping-agent / scoped key" if e["event"] == "INTENT_RECEIVED"
                      else "registry / product + merchant" if e["event"] == "FACTS_RESOLVED"
-                     else "trust-middleware+" if e["event"] in ("PAYMENT_CAPTURED","PAYMENT_FAILED")
+                     else "TrustGate+" if e["event"] in ("PAYMENT_CAPTURED","PAYMENT_FAILED")
                      else f"policy-engine / travel.v{1}" if "DECISION" in e["event"] or "APPROVAL" in e["event"]
-                     else "trust-middleware")
+                     else "TrustGate")
             rows += f"""
 <tr>
   <td>

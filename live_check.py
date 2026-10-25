@@ -7,7 +7,7 @@ import sys
 from decimal import Decimal
 
 from tests.conftest import Env
-from trust_mw.paypal_adapter import PayPalAdapter
+from trustgate.paypal_adapter import PayPalAdapter
 
 paypal = PayPalAdapter.from_env()
 env = Env(payments=paypal)

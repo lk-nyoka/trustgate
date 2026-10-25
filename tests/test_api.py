@@ -3,7 +3,7 @@ import re
 from fastapi.testclient import TestClient
 
 from tests.conftest import PAGES, Env
-from trust_mw.api import create_app
+from trustgate.api import create_app
 
 AGENT = {"Authorization": "Bearer agent_key_1"}
 PAGES["https://demo-airlines.test/xss"] = (
